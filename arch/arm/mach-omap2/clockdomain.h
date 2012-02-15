@@ -29,6 +29,8 @@
  *
  * CLKDM_NO_AUTODEPS: Prevent "autodeps" from being added/removed from this
  *     clockdomain.  (Currently, this applies to OMAP3 clockdomains only.)
+ * CLKDM_NO_MANUAL_TRANS: Prevent clockdomain code from attempting to change
+ *     clockdomain state manually. Needed for PER domain on omap3.
  * CLKDM_MISSING_IDLE_REPORTING: The idle status of the IP blocks and
  *     clocks inside this clockdomain are not taken into account by
  *     the PRCM when determining whether the clockdomain is idle.
@@ -49,6 +51,7 @@
 #define CLKDM_CAN_ENABLE_AUTO			(1 << 2)
 #define CLKDM_CAN_DISABLE_AUTO			(1 << 3)
 #define CLKDM_NO_AUTODEPS			(1 << 4)
+#define CLKDM_NO_MANUAL_TRANS			(1 << 5)
 #define CLKDM_MISSING_IDLE_REPORTING		(1 << 6)
 
 #define CLKDM_CAN_HWSUP		(CLKDM_CAN_ENABLE_AUTO | CLKDM_CAN_DISABLE_AUTO)
