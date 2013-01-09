@@ -214,13 +214,8 @@ static const struct attribute_group modemctl_group = {
 	.attrs = modemctl_attributes,
 };
 
-#define UART_SEL_MASK   (1 << 1)
-extern void (*sec_get_param_value)(int idx, void *value);
-
 static void infinion_on(struct modemctl *mc)
 {
-	int switch_sel;
-
 	dev_dbg(mc->dev, "%s\n", __func__);
 	if(!mc->gpio_cp_reset )
 		return;
