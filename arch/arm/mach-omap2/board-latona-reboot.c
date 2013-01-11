@@ -20,11 +20,6 @@
 #include <plat/io.h>
 #include <mach/board-latona.h>
 
-/* Debug */
-#define R_DEBUG 0
-
-struct class *reboot_class;
-
 char latona_androidboot_mode[16];
 EXPORT_SYMBOL(latona_androidboot_mode);
 
@@ -51,58 +46,6 @@ struct latona_reboot_code {
 	char *cmd;
 	int mode;
 };
-
-static int __latona_reboot_call(struct notifier_block *this,
-				    unsigned long code, void *cmd)
-{
-	int mode = REBOOT_MODE_NONE;
-	int temp_mode;
-
-	struct latona_reboot_code reboot_tbl[] = {
-		{"arm11_fota", REBOOT_MODE_ARM11_FOTA},
-		{"arm9_fota", REBOOT_MODE_ARM9_FOTA},
-		{"recovery", REBOOT_MODE_RECOVERY},
-		{"cp_crash", REBOOT_MODE_CP_CRASH},
-	};
-	size_t i, n;
-
-	if ((code == SYS_RESTART) && cmd) {
-		n = ARRAY_SIZE(reboot_tbl);
-		for (i = 0; i < n; i++) {
-			if (!strcmp((char *)cmd, reboot_tbl[i].cmd)) {
-				mode = reboot_tbl[i].mode;
-				break;
-			}
-		}
-	}
-
-	return NOTIFY_DONE;
-}				/* end fn __latona_reboot_call */
-
-static struct notifier_block __latona_reboot_notifier = {
-	.notifier_call = __latona_reboot_call,
-};
-
-int __init latona_reboot_init(void)
-{
-#ifdef R_DEBUG
-	printk("[%s]\n",__func__);
-#endif
-	reboot_class = class_create(THIS_MODULE, "latona_reboot");
-	if (IS_ERR(reboot_class))
-		pr_err("Class(latona_reboot) Creating Fail!!!\n");
-
-	return 0;
-}				/* end fn latona_reboot_init */
-
-int __init latona_reboot_post_init(void)
-{
-#ifdef R_DEBUG
-	printk("[%s]\n",__func__);
-#endif
-	register_reboot_notifier(&__latona_reboot_notifier);
-	return 0;
-}				/* end fn latona_reboot_post_init */
 
 struct latona_reboot_mode {
 	char *cmd;
