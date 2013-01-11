@@ -25,12 +25,6 @@
 
 struct class *reboot_class;
 
-void (*latona_set_param_value) (int idx, void *value);
-EXPORT_SYMBOL(latona_set_param_value);
-
-void (*latona_get_param_value) (int idx, void *value);
-EXPORT_SYMBOL(latona_get_param_value);
-
 char latona_androidboot_mode[16];
 EXPORT_SYMBOL(latona_androidboot_mode);
 
@@ -63,7 +57,6 @@ static int __latona_reboot_call(struct notifier_block *this,
 {
 	int mode = REBOOT_MODE_NONE;
 	int temp_mode;
-	int default_switchsel = 5;
 
 	struct latona_reboot_code reboot_tbl[] = {
 		{"arm11_fota", REBOOT_MODE_ARM11_FOTA},
@@ -81,21 +74,6 @@ static int __latona_reboot_call(struct notifier_block *this,
 				break;
 			}
 		}
-	}
-
-	if (code != SYS_POWER_OFF) {
-		if (latona_get_param_value && latona_set_param_value) {
-			/* in case of RECOVERY mode we set switch_sel
-			 * with default value */
-			latona_get_param_value(__REBOOT_MODE, &temp_mode);
-			if (temp_mode == REBOOT_MODE_RECOVERY)
-				latona_set_param_value(__SWITCH_SEL,
-						    &default_switchsel);
-		}
-
-		/* set normal reboot_mode when reset */
-		if (latona_set_param_value)
-			latona_set_param_value(__REBOOT_MODE, &mode);
 	}
 
 	return NOTIFY_DONE;
