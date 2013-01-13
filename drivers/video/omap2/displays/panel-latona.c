@@ -296,7 +296,7 @@ static int nt35510_panel_probe(struct omap_dss_device *dssdev)
     // panel timings
     dssdev->panel.timings = nt35510_default_panel_timings;
 
-    if(current_panel == 1)
+    if(current_panel == 1 || current_panel == 5)
     {
 	    dssdev->panel.timings = nt35510_hitachi_panel_timings;
     } 
