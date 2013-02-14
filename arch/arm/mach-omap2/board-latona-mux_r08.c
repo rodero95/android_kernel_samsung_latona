@@ -48,7 +48,7 @@
 
 #define LATONA_OMAP_OUTPUT_GPIO(name, val)		{name, val, (unsigned int)#name},
 
-static unsigned int __omap_board_output_gpio[][3] __initdata = {
+static unsigned int __omap_board_output_gpio[][3] = {
 	LATONA_OMAP_OUTPUT_GPIO(OMAP_GPIO_PS_HOLD_PU, 0)
 	LATONA_OMAP_OUTPUT_GPIO(OMAP_GPIO_FM_nRST, 0)
 	LATONA_OMAP_OUTPUT_GPIO(OMAP_GPIO_CAM_CIF_NRST, 0)
@@ -68,6 +68,8 @@ static unsigned int __omap_board_output_gpio[][3] __initdata = {
 	LATONA_OMAP_OUTPUT_GPIO(OMAP_GPIO_MASSMEMORY_EN, 1)
 	LATONA_OMAP_OUTPUT_GPIO(OMAP_GPIO_ALS_EN, 0)
 	LATONA_OMAP_OUTPUT_GPIO(OMAP_GPIO_CON_CP_SEL, 0)
+	LATONA_OMAP_OUTPUT_GPIO(OMAP_GPIO_UART_SEL, 1)
+	LATONA_OMAP_OUTPUT_GPIO(OMAP_GPIO_EARPATH_SEL, 0)
 };	/* end array __omap_output_gpio */
 
 unsigned int latona_board_output_gpio_size = ARRAY_SIZE(__omap_board_output_gpio);
@@ -75,7 +77,7 @@ EXPORT_SYMBOL(latona_board_output_gpio_size);
 unsigned int (*latona_board_output_gpio_ptr)[3] = __omap_board_output_gpio;
 EXPORT_SYMBOL(latona_board_output_gpio_ptr);
 
-static unsigned int __omap_wakeup_gpio[] __initdata = {
+static unsigned int __omap_wakeup_gpio[] = {
 	OMAP_GPIO_JACK_NINT,
 	OMAP_GPIO_IPC_SRDY,
 	OMAP_GPIO_CHG_ING_N,
@@ -94,7 +96,7 @@ EXPORT_SYMBOL(latona_board_wakeup_gpio_size);
 unsigned int (*latona_board_wakeup_gpio_ptr) = __omap_wakeup_gpio;
 EXPORT_SYMBOL(latona_board_wakeup_gpio_ptr);
 
-static struct omap_board_mux __omap_board_core_mux[] __initdata = {
+static struct omap_board_mux __omap_board_core_mux[] = {
 
 /*
  *		Name, reg-offset,
@@ -396,11 +398,11 @@ static struct omap_board_mux __omap_board_core_mux[] __initdata = {
 	OMAP3_MUX(CAM_D11,	OMAP_MUX_MODE0 | OMAP_PIN_INPUT_PULLDOWN),
 
 	// 129 (B26, L, GPIO_111, PDA_ACTIVE)
-	//OMAP3_MUX(CAM_XCLKB,  OMAP_MUX_MODE4 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(CAM_XCLKB,  OMAP_MUX_MODE4 | OMAP_PIN_OUTPUT),
 	// 130 (B20, L, SAFE_MODE, N/C) - 09/17
 	OMAP3_MUX(CAM_WEN, OMAP_MUX_MODE7 | OMAP_PIN_INPUT_PULLDOWN),		// Brian: NC
 	// 131 (D25, L, GPIO_126, UART_SEL, O[L], OFF[L])
-	//OMAP3_MUX(CAM_STROBE,  OMAP_MUX_MODE4 | OMAP_PIN_INPUT_PULLDOWN),
+	OMAP3_MUX(CAM_STROBE,  OMAP_MUX_MODE4 | OMAP_PIN_INPUT_PULLDOWN),
 	// 132 (AF18, L, GPIO_112, DET_3.5, I[U], OFF[U])
 	OMAP3_MUX(CSI2_DX0,  OMAP_MUX_MODE4 | OMAP_PIN_INPUT | OMAP_WAKEUP_EN),
 	// 133 (AF17, L, GPIO_113, EAR_KEY, I[Z], OFF[L])

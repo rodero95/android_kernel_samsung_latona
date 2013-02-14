@@ -875,14 +875,16 @@ static void gpio_unmask_irq(struct irq_data *d)
 	if (trigger)
 		_set_gpio_triggering(bank, GPIO_INDEX(bank, gpio), trigger);
 
-	/* For level-triggered GPIOs, the clearing must be done after
-	 * the HW source is cleared, thus after the handler has run */
-	if (bank->level_mask & irq_mask) {
-		_set_gpio_irqenable(bank, gpio, 0);
-		_clear_gpio_irqstatus(bank, gpio);
-	}
-
 	_set_gpio_irqenable(bank, gpio, 1);
+	/*
+	 * For level-triggered GPIOs, the clearing must be done after
+	 * the HW source is cleared, thus after the handler has run.
+	 * Also, make sure to clear the status _after_ enabling the irq
+	 * so that pending event will be cleared.
+	 */
+	if (bank->level_mask & irq_mask)
+		_clear_gpio_irqstatus(bank, gpio);
+
 	spin_unlock_irqrestore(&bank->lock, flags);
 }
 
@@ -1714,10 +1716,11 @@ int omap2_gpio_prepare_for_idle(int off_mode, bool suspend)
 			continue;
 
 		if (bank->loses_context)
-			if (pm_runtime_put_sync_suspend(bank->dev) < 0)
-				dev_err(bank->dev, "%s: GPIO bank %d "
-						"pm_runtime_put_sync failed\n",
-						__func__, bank->id);
+			if (bank->id != 5) /*IPC_SPI Workaround for SDRY GPIO. Disable RUNTIME PM on GPIO Bank 5.*/
+				if (pm_runtime_put_sync_suspend(bank->dev) < 0)
+					dev_err(bank->dev, "%s: GPIO bank %d "
+							"pm_runtime_put_sync failed\n",
+							__func__, bank->id);
 	}
 
 	if (ret)
@@ -1736,10 +1739,11 @@ void omap2_gpio_resume_after_idle(int off_mode)
 			continue;
 
 		if (bank->loses_context)
-			if (pm_runtime_get_sync(bank->dev) < 0)
-				dev_err(bank->dev, "%s: GPIO bank %d "
-						"pm_runtime_get_sync failed\n",
-						__func__, bank->id);
+			if (bank->id != 5) /*IPC_SPI Workaround for SDRY GPIO. Disable RUNTIME PM on GPIO Bank 5.*/
+				if (pm_runtime_get_sync(bank->dev) < 0)
+					dev_err(bank->dev, "%s: GPIO bank %d "
+							"pm_runtime_get_sync failed\n",
+							__func__, bank->id);
 
 		omap2_gpio_restore_edge_wakeup(bank);
 

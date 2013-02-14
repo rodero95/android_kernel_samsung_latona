@@ -81,7 +81,7 @@ static struct omap_device_pm_latency omap_uart_latency[] = {
 	},
 };
 
-#ifdef CONFIG_OMAP_MUX
+#if defined (CONFIG_OMAP_MUX) && !defined(CONFIG_MACH_OMAP_LATONA)
 static struct omap_device_pad default_uart1_pads[] __initdata = {
 	{
 		.name	= "uart1_cts.uart1_cts",
@@ -347,8 +347,6 @@ static int __init omap_serial_early_init(void)
 	struct omap_hwmod *oh;
 
 	for (i = 0; i < OMAP_MAX_HSUART_PORTS; i++) {
-		if(i==2)
-		    continue;
 		snprintf(omap_tty_name, MAX_UART_HWMOD_NAME_LEN,
 			"%s%d", OMAP_SERIAL_NAME, i);
 		if (cmdline_find_option(omap_tty_name)) {
