@@ -120,9 +120,6 @@ typedef struct {
 	param_str_t param_str_list[MAX_STRING_PARAM];
 } status_t;
 
-extern void (*latona_set_param_value) (int idx, void *value);
-extern void (*latona_get_param_value) (int idx, void *value);
-
 #define USB_SEL_MASK			(1 << 0)
 #define UART_SEL_MASK			(1 << 1)
 /* END: Default Parameter Values */
