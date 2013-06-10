@@ -1,6 +1,6 @@
 /**
  *
- *  Copyright (C) 2012 - Aditya Patange
+ *  Copyright (C) 2013 - Dheeraj CVR (cvr.dheeraj@gmail.com)
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License version 2 as
@@ -42,11 +42,6 @@ static __init int setup_boot_mode(char *opt)
 
 __setup("bootmode=", setup_boot_mode);
 
-struct latona_reboot_code {
-	char *cmd;
-	int mode;
-};
-
 struct latona_reboot_mode {
 	char *cmd;
 	char mode;
@@ -81,7 +76,7 @@ __return:
 #define LATONA_REBOOT_MODE_ADDR		(OMAP343X_CTRL_BASE + 0x0918)
 #define LATONA_REBOOT_FLAG_ADDR		(OMAP343X_CTRL_BASE + 0x09C4)
 
-int latona_update_reboot_reason(char mode, const char *cmd)
+void latona_write_reboot_reason(char mode, const char *cmd)
 {
 	u32 scpad = 0;
 	const u32 scpad_addr = LATONA_REBOOT_MODE_ADDR;
@@ -130,6 +125,4 @@ int latona_update_reboot_reason(char mode, const char *cmd)
 	}
 
 	omap_writel(scpad | reason, scpad_addr);
-	
-	return (int)mode;
-}				
+}

@@ -166,7 +166,7 @@ int hci_tty_open(struct inode *inod, struct file *file)
 
 		if (err != -EINPROGRESS) {
 			pr_err("st_register failed %d", err);
-			return err;
+			goto error;
 		}
 
 		/* ST is busy with either protocol
@@ -181,7 +181,8 @@ int hci_tty_open(struct inode *inod, struct file *file)
 			pr_err("Timeout(%d sec),didn't get reg "
 					"completion signal from ST",
 					BT_REGISTER_TIMEOUT / 1000);
-			return -ETIMEDOUT;
+			err = -ETIMEDOUT;
+			goto error;
 		}
 
 		/* Is ST registration callback
@@ -189,7 +190,8 @@ int hci_tty_open(struct inode *inod, struct file *file)
 		if (hst->reg_status != 0) {
 			pr_err("ST registration completed with invalid "
 					"status %d", hst->reg_status);
-			return -EAGAIN;
+			err = -EAGAIN;
+			goto error;
 		}
 
 done:
@@ -212,6 +214,10 @@ done:
 	init_waitqueue_head(&hst->data_q);
 
 	return 0;
+
+error:
+	kfree(hst);
+	return err;
 }
 
 /** hci_tty_release Function
