@@ -19,6 +19,7 @@
 #include <linux/input.h>
 #include <linux/input/matrix_keypad.h>
 #include <linux/gpio.h>
+#include <linux/i2c-gpio.h>
 #include <linux/i2c/twl.h>
 #include <linux/regulator/machine.h>
 #include <linux/regulator/fixed.h>
@@ -37,7 +38,9 @@
 #include <plat/usb.h>
 #include <linux/switch.h>
 #include <mach/board-latona.h>
+#include <linux/i2c/twl4030-madc.h>
 #include <linux/irq.h>
+#include <linux/gp2a.h>
 #include "mux.h"
 #include "hsmmc.h"
 #include "common-board-devices.h"
@@ -53,6 +56,8 @@ struct s5ka3dfx_platform_data omap_board_s5ka3dfx_platform_data;
 
 /* Atmel Touchscreen */
 #define OMAP_GPIO_TSP_INT 142
+
+#define GP2A_LIGHT_ADC_CHANNEL	4
 
 /* ZEUS Key and Headset Switch */
 
@@ -170,10 +175,6 @@ static struct regulator_consumer_supply latona_vmmc1_supply = {
 	.supply		= "vmmc",
 };
 
-static struct regulator_consumer_supply latona_vsim_supply = {
-	.supply		= "vmmc_aux",
-};
-
 static struct regulator_consumer_supply latona_vmmc2_supply = {
 	.supply		= "vmmc",
 };
@@ -222,21 +223,6 @@ static struct regulator_init_data latona_vmmc2 = {
 	.consumer_supplies      = &latona_vmmc2_supply,
 };
 
-/* VSIM for OMAP VDD_MMC1A (i/o for DAT4..DAT7) */
-static struct regulator_init_data latona_vsim = {
-	.constraints = {
-		.min_uV			= 1800000,
-		.max_uV			= 3000000,
-		.valid_modes_mask	= REGULATOR_MODE_NORMAL
-					| REGULATOR_MODE_STANDBY,
-		.valid_ops_mask		= REGULATOR_CHANGE_VOLTAGE
-					| REGULATOR_CHANGE_MODE
-					| REGULATOR_CHANGE_STATUS,
-	},
-	.num_consumer_supplies  = 1,
-	.consumer_supplies      = &latona_vsim_supply,
-};
-
 static struct regulator_init_data latona_vmmc3 = {
 	.constraints = {
 		.valid_ops_mask	= REGULATOR_CHANGE_STATUS,
@@ -259,6 +245,23 @@ static struct platform_device *latona_board_devices[] __initdata = {
 	&headset_switch_device,
 	&board_zeus_key_device,     /* ZEUS KEY */ 
 	&samsung_led_device,         /* SAMSUNG LEDs */ 
+};
+
+static int gp2a_light_adc_value(void)
+{
+	return twl4030_get_madc_conversion(GP2A_LIGHT_ADC_CHANNEL);
+}
+
+static void gp2a_power(bool on)
+{
+	/* this controls the power supply rail to the gp2a IC */
+	gpio_set_value(OMAP_GPIO_ALS_EN, on);
+}
+
+static struct gp2a_platform_data gp2a_pdata = {
+	.power = gp2a_power,
+	.p_out = OMAP_GPIO_PS_VOUT,
+	.light_adc_value = gp2a_light_adc_value,
 };
 
 static struct platform_device omap_vwlan_device = {
@@ -371,7 +374,6 @@ static int latona_twl_gpio_setup(struct device *dev,
 	 * regulators will be set up only *after* we return.
 	*/
 	latona_vmmc1_supply.dev = mmc[1].dev;
-	latona_vsim_supply.dev = mmc[1].dev;
 	latona_vmmc2_supply.dev = mmc[0].dev;
 
 	return 0;
@@ -480,20 +482,14 @@ static struct i2c_board_info __initdata latona_i2c_bus2_info[] = {
 	{
 		I2C_BOARD_INFO("cam_pmic", CAM_PMIC_I2C_ADDR),
 	},
-#ifdef CONFIG_SAMSUNG_BATTERY
-	{
-		I2C_BOARD_INFO("secFuelgaugeDev", 0x36),
-		.flags = I2C_CLIENT_WAKE,
-		.irq = OMAP_GPIO_IRQ(OMAP_GPIO_FUEL_INT_N),
-	},
-#endif
 #ifdef CONFIG_INPUT_YAS529
 	{
-		I2C_BOARD_INFO("geomagnetic", 0x2E),
+		I2C_BOARD_INFO("Yas529Geomag", 0x2E),
 	},
 #endif
 	{
-		I2C_BOARD_INFO("Si4709_driver", 0x10),			
+		I2C_BOARD_INFO("gp2a", 0x44),
+		.platform_data = &gp2a_pdata,
 	},
 };
 
@@ -501,6 +497,77 @@ static struct i2c_board_info __initdata latona_i2c_bus3_info[] = {
 	{
 		I2C_BOARD_INFO("qt602240_ts", 0x4A),
 	},
+};
+
+static __initdata struct i2c_board_info latona_i2c4_boardinfo[] = {
+	{
+		I2C_BOARD_INFO("secFuelgaugeDev", 0x36),
+		.flags = I2C_CLIENT_WAKE,
+		.irq = OMAP_GPIO_IRQ(OMAP_GPIO_FUEL_INT_N),
+	},
+};
+
+static struct i2c_gpio_platform_data latona_gpio_i2c4_pdata = {
+	.sda_pin = OMAP_GPIO_FUEL_SDA,
+	.scl_pin = OMAP_GPIO_FUEL_SCL,
+	.udelay = 10,
+	.timeout = 0,
+};
+
+static struct platform_device latona_gpio_i2c4_device = {
+	.name	= "i2c-gpio",
+	.id	= 4,
+	.dev = {
+		.platform_data = &latona_gpio_i2c4_pdata,
+	},
+};
+
+static __initdata struct i2c_board_info latona_i2c5_boardinfo[] = {
+	{
+		I2C_BOARD_INFO("YamahaBMA222", 0x08),
+	},
+};
+
+static struct i2c_gpio_platform_data latona_gpio_i2c5_pdata = {
+	.sda_pin = OMAP_GPIO_SENSOR_SDA,
+	.scl_pin = OMAP_GPIO_SENSOR_SCL,
+	.udelay = 5,
+	.timeout = 0,
+};
+
+static struct platform_device latona_gpio_i2c5_device = {
+	.name	= "i2c-gpio",
+	.id	= 5,
+	.dev = {
+		.platform_data = &latona_gpio_i2c5_pdata,
+	},
+};
+
+static __initdata struct i2c_board_info latona_i2c6_boardinfo[] = {
+	{
+		I2C_BOARD_INFO("Si4709_driver", 0x10),
+	},
+};
+
+static struct i2c_gpio_platform_data latona_gpio_i2c6_pdata = {
+	.sda_pin = OMAP_GPIO_FM_SDA,
+	.scl_pin = OMAP_GPIO_FM_SCL,
+	.udelay = 5,
+	.timeout = 0,
+};
+
+static struct platform_device latona_gpio_i2c6_device = {
+	.name	= "i2c-gpio",
+	.id	= 6,
+	.dev = {
+		.platform_data = &latona_gpio_i2c6_pdata,
+	},
+};
+
+static struct platform_device *latona_i2c_gpio_devices[] __initdata = {
+	&latona_gpio_i2c4_device, // Fuel Guage MAX17040
+	&latona_gpio_i2c5_device, // Yamaha BMA222
+	&latona_gpio_i2c6_device, // Si4709 FM Radio
 };
 
 static int __init omap_i2c_init(void)
@@ -533,6 +600,11 @@ static int __init omap_i2c_init(void)
 	omap_pmic_init(1, 400, "twl5030", INT_34XX_SYS_NIRQ, &latona_twldata);	
 	omap_register_i2c_bus(3, 400, latona_i2c_bus3_info,
 			ARRAY_SIZE(latona_i2c_bus3_info));
+
+	i2c_register_board_info(4, latona_i2c4_boardinfo, ARRAY_SIZE(latona_i2c4_boardinfo));
+	i2c_register_board_info(5, latona_i2c5_boardinfo, ARRAY_SIZE(latona_i2c5_boardinfo));
+	i2c_register_board_info(6, latona_i2c6_boardinfo, ARRAY_SIZE(latona_i2c6_boardinfo));
+
 	return 0;
 }
 
@@ -560,6 +632,8 @@ void __init latona_peripherals_init(void)
 		ARRAY_SIZE(latona_board_devices));
 	twl4030_get_scripts(&latona_t2scripts_data);
 	board_onenand_init();
+	platform_add_devices(latona_i2c_gpio_devices,
+		ARRAY_SIZE(latona_i2c_gpio_devices));
 	omap_i2c_init();
 	atmel_dev_init();
 	platform_device_register(&omap_vwlan_device);

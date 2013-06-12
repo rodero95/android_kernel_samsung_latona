@@ -611,10 +611,11 @@ config INPUT_YAS529_POSITION
 	    6: bottom, lower-right
 	    7: bottom, lower-left
 
-config INPUT_YAS529_USE_GPIO_I2C
-	tristate "Yamaha YAS529 I2C Policy"
+config OPTICAL_GP2A
+	depends on I2C && GENERIC_GPIO
+	tristate "GP2A ambient light and proximity input device"
 	default n
 	help
-		Say Y to use I2C using GPIO
+	  This option enables proximity & light sensors using gp2a driver.
 
 endif
