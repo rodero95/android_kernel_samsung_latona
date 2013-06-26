@@ -48,7 +48,7 @@
 
 #define LCD_XRES			480
 #define LCD_YRES			800
-#define LCD_PIXCLOCK_MAX		29500 // 26000
+#define LCD_PIXCLOCK_MAX		20000 // 26000
 
 static int current_panel = -1;	// 0:sony, 1:Hitachi(20mA) , 2:Hydis, 3:SMD, 4:Sony(a-Si), 5:Hitachi(17mA)
 static int is_nt35510_spi_shutdown = 0;
@@ -329,25 +329,6 @@ static void nt35510_get_resolution(struct omap_dss_device *dssdev,
 	*xres = dssdev->panel.timings.x_res;
 }
 
-static int nt35510_get_recommended_bpp(struct omap_dss_device *dssdev)
-{
-	return 16; //16 bit color
-}
-
-static int nt35510_set_update_mode(struct omap_dss_device *dssdev,
-				   enum omap_dss_update_mode mode)
-{
-	if (mode != OMAP_DSS_UPDATE_AUTO)
-		return -EINVAL;
-	return 0;
-}
-
-static enum omap_dss_update_mode nt35510_get_update_mode(
-	struct omap_dss_device *dssdev)
-{
-	return OMAP_DSS_UPDATE_AUTO;
-}
-
 static struct omap_dss_driver nt35510_driver = {
 	.probe          = nt35510_panel_probe,
 	.remove         = nt35510_panel_remove,
@@ -357,11 +338,8 @@ static struct omap_dss_driver nt35510_driver = {
 	.suspend        = nt35510_panel_suspend,
 	.resume         = nt35510_panel_resume,
 
-	.set_update_mode = nt35510_set_update_mode,
-	.get_update_mode = nt35510_get_update_mode,
-
 	.get_resolution	= nt35510_get_resolution,
-	.get_recommended_bpp = nt35510_get_recommended_bpp,
+	.get_recommended_bpp = omapdss_default_get_recommended_bpp,
 
 	.set_timings	= nt35510_panel_set_timings,
 	.get_timings	= nt35510_panel_get_timings,
