@@ -26,14 +26,11 @@
 #include <linux/wl12xx.h>
 #include <linux/mmc/host.h>
 #include <linux/leds.h>
-
-
 #include <media/v4l2-int-device.h>
-
+#include <linux/i2c/atmel_mxt_ts.h>
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
-
 #include <plat/common.h>
 #include <plat/usb.h>
 #include <linux/switch.h>
@@ -53,9 +50,6 @@
 
 struct ce147_platform_data omap_board_ce147_platform_data;
 struct s5ka3dfx_platform_data omap_board_s5ka3dfx_platform_data;
-
-/* Atmel Touchscreen */
-#define OMAP_GPIO_TSP_INT 142
 
 #define GP2A_LIGHT_ADC_CHANNEL	4
 
@@ -127,29 +121,29 @@ static inline void __init board_init_zeus_key(void)
 }
 /* End: ZEUS Key and Headset Switch */
 
-/* Samsung LEDs support */
+/* Latona LEDs support */
 
-static struct led_info sec_keyled_list[] = {
+static struct led_info latona_keyled_list[] = {
 	{
 	 .name = "button-backlight",
 	 },
 };
 
-static struct led_platform_data sec_keyled_data = {
-	.num_leds = ARRAY_SIZE(sec_keyled_list),
-	.leds = sec_keyled_list,
+static struct led_platform_data latona_keyled_data = {
+	.num_leds = ARRAY_SIZE(latona_keyled_list),
+	.leds = latona_keyled_list,
 };
 
-static struct platform_device samsung_led_device = {
-	.name = "secLedDriver",
+static struct platform_device latona_led_device = {
+	.name = "LatonaLedDriver",
 	.id = -1,
 	.num_resources = 0,
 	.dev = {
-		.platform_data = &sec_keyled_data,
+		.platform_data = &latona_keyled_data,
 		},
 };
 
-/* End: Samsung LED's support */ 
+/* End: Latona LED's support */ 
 
 /* LATONA has only Volume UP/DOWN */
 static uint32_t board_keymap[] = {
@@ -364,7 +358,7 @@ static struct fixed_voltage_config latona_vwlan = {
 static struct platform_device *latona_board_devices[] __initdata = {
 	&headset_switch_device,
 	&board_zeus_key_device,     /* ZEUS KEY */ 
-	&samsung_led_device,         /* SAMSUNG LEDs */ 
+	&latona_led_device,         /* SAMSUNG LEDs */ 
 };
 
 static int gp2a_light_adc_value(void)
@@ -578,6 +572,68 @@ static void __init board_onenand_init(void)
 	gpmc_onenand_init(&board_onenand_data);
 }
 
+static int latona_mxt_key_codes[MXT_KEYARRAY_MAX_KEYS] = {
+	[0] = KEY_MENU,
+	[1] = KEY_BACK,
+};
+
+/* Latona specific TSP configuration */
+static u8 mxt_init_vals[] = {
+	/* MXT_GEN_COMMAND(6) */
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	/* MXT_GEN_POWER(7) */
+	0x40, 0xff, 0x32,
+	/* MXT_GEN_ACQUIRE(8) */
+	0x0a, 0x00, 0x05, 0x01, 0x00, 0x00, 0x09, 0x1b,
+	/* MXT_TOUCH_MULTI(9) */
+	0x8f, 0x00, 0x00, 0x12, 0x0b, 0x01, 0x10, 0x20, 0x02, 0x01,
+	0x00, 0x03, 0x01, 0x2e, 0x05, 0x05, 0x28, 0x0a, 0x1f, 0x03,
+	0xdf, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x12,
+	/* MXT_TOUCH_KEYARRAY(15) */
+	0x83, 0x10, 0x0b, 0x02, 0x01, 0x01, 0x00, 0x2d, 0x04, 0x00,
+	0x00,
+	/* MXT_SPT_GPIOPWM(19) */
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x22, 0x27, 0x73, 0x3a,
+	/* MXT_PROCI_GRIPFACE(20) */
+	0x13, 0x00, 0x00, 0x05, 0x05, 0x00, 0x00, 0x1e, 0x14, 0x04,
+	0x0f, 0x0a,
+	/* MXT_PROCG_NOISE(22) */
+	0x87, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x1b, 0x00,
+	0x00, 0x1d, 0x22, 0x27, 0x31, 0x3a, 0x03,
+	/* MXT_TOUCH_PROXIMITY(23) */
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00,
+	/* MXT_PROCI_ONETOUCH(24) */
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	/* MXT_SPT_SELFTEST(25) */
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00,
+	/* MXT_PROCI_TWOTOUCH(27) */
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	/* MXT_SPT_CTECONFIG(28) */
+	0x00, 0x00, 0x02, 0x10, 0x3f, 0x3c,
+};
+
+static struct mxt_platform_data latona_mxt_platform_data = {
+	.config			= mxt_init_vals,
+	.config_length		= ARRAY_SIZE(mxt_init_vals),
+
+	.x_line         = 18,
+	.y_line         = 11,
+	.x_size         = 800,
+	.y_size         = 480,
+	.blen           = 0x10,
+	.threshold      = 0x20,
+	.voltage        = 2800000,              /* 2.8V */
+	.orient         = MXT_DIAGONAL,
+	.irqflags       = IRQF_TRIGGER_FALLING,
+	.key_codes	= latona_mxt_key_codes,
+	.lcden_gpio	= OMAP_GPIO_TOUCH_EN,
+};
+
 static struct i2c_board_info __initdata latona_i2c_bus2_info[] = {
 #if defined(CONFIG_SND_SOC_MAX97000)
 	{
@@ -606,7 +662,9 @@ static struct i2c_board_info __initdata latona_i2c_bus2_info[] = {
 
 static struct i2c_board_info __initdata latona_i2c_bus3_info[] = {
 	{
-		I2C_BOARD_INFO("qt602240_ts", 0x4A),
+		I2C_BOARD_INFO("atmel_mxt_ts", 0x4A),
+		.platform_data = &latona_mxt_platform_data,
+		.irq = OMAP_GPIO_IRQ(OMAP_GPIO_TOUCH_INT),
 	},
 };
 
@@ -713,11 +771,11 @@ static int __init omap_i2c_init(void)
 static void atmel_dev_init(void)
 {
 	/* Set the ts_gpio pin mux */
-	if (gpio_request(OMAP_GPIO_TSP_INT, "touch_atmel") < 0) {
+	if (gpio_request(OMAP_GPIO_TOUCH_INT, "touch_atmel") < 0) {
 		printk(KERN_ERR "can't get synaptics pen down GPIO\n");
 		return;
 	}
-	gpio_direction_input(OMAP_GPIO_TSP_INT);
+	gpio_direction_input(OMAP_GPIO_TOUCH_INT);
 	
 }
 
@@ -737,8 +795,8 @@ void __init latona_peripherals_init(void)
 	latona_connector_init();
 	platform_add_devices(latona_i2c_gpio_devices,
 		ARRAY_SIZE(latona_i2c_gpio_devices));
-	omap_i2c_init();
 	atmel_dev_init();
+	omap_i2c_init();
 	platform_device_register(&omap_vwlan_device);
 	usb_musb_init(&latona_musb_board_data);
 #ifdef CONFIG_SAMSUNG_PHONE_SVNET
