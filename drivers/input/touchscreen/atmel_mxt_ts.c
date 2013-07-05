@@ -181,6 +181,7 @@
 #define MXT_BACKUP_TIME		25	/* msec */
 #define MXT_RESET_TIME		65	/* msec */
 #define MXT_ENABLE_TIME		80	/* msec */
+#define MXT_CAL_TIME		25	/* msec */
 
 #define MXT_FWRESET_TIME	175	/* msec */
 
@@ -933,6 +934,27 @@ static void mxt_calc_resolution(struct mxt_data *data)
 	}
 }
 
+static ssize_t mxt_calibrate_store(struct device *dev,
+				   struct device_attribute *attr,
+				   const char *buf, size_t count)
+{
+	struct mxt_data *data = dev_get_drvdata(dev);
+	int ret;
+
+	disable_irq(data->irq);
+
+	/* Perform touch surface recalibration */
+	ret = mxt_write_object(data, MXT_GEN_COMMAND,
+			MXT_COMMAND_CALIBRATE, 1);
+	if (ret)
+		goto out;
+	msleep(MXT_CAL_TIME);
+
+out:
+	enable_irq(data->irq);
+	return ret ?: count;
+}
+
 static ssize_t mxt_object_show(struct device *dev,
 				    struct device_attribute *attr, char *buf)
 {
@@ -1076,10 +1098,12 @@ static ssize_t mxt_update_fw_store(struct device *dev,
 	return count;
 }
 
+static DEVICE_ATTR(calibrate, 0664, NULL, mxt_calibrate_store);
 static DEVICE_ATTR(object, 0444, mxt_object_show, NULL);
 static DEVICE_ATTR(update_fw, 0664, NULL, mxt_update_fw_store);
 
 static struct attribute *mxt_attrs[] = {
+	&dev_attr_calibrate.attr,
 	&dev_attr_object.attr,
 	&dev_attr_update_fw.attr,
 	NULL
