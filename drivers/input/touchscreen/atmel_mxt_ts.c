@@ -1173,11 +1173,17 @@ static int mxt_resume(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct mxt_data *data = i2c_get_clientdata(client);
 	struct input_dev *input_dev = data->input_dev;
-
+	int ret;
+	
 	gpio_direction_output(data->pdata->lcden_gpio, 1);
 	msleep(MXT_ENABLE_TIME);
 
-	enable_irq(data->irq);
+	/* Send a calibration command on System Resume */
+		ret = mxt_write_object(data, MXT_GEN_COMMAND,
+				       MXT_COMMAND_CALIBRATE, 1);
+		if (ret)
+			dev_err(dev, "Resume recalibration failed %d\n", ret);
+		msleep(MXT_CAL_TIME);
 
 	/* Soft reset */
 	mxt_write_object(data, MXT_GEN_COMMAND,
@@ -1192,6 +1198,8 @@ static int mxt_resume(struct device *dev)
 
 	mutex_unlock(&input_dev->mutex);
 
+	enable_irq(data->irq);
+	
 #ifdef CONFIG_LEDS_LATONA
 	latona_leds_report_event(KEY_POWER, 1);
 #endif
