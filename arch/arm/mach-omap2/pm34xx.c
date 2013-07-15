@@ -461,6 +461,7 @@ void omap_sram_idle(bool suspend)
 	if (per_next_state < PWRDM_POWER_ON && core_next_state < PWRDM_POWER_ON) {
 		per_going_off = (per_next_state == PWRDM_POWER_OFF) ? 1 : 0;
 		if (omap2_gpio_prepare_for_idle(per_going_off, suspend)) {
+			printk("%s: abort_gpio\n", __func__);
 			pwrdm_post_transition();
 			goto abort_gpio;
 		}
