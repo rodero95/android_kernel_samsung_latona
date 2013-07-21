@@ -3,10 +3,8 @@
  *
  * Modified from mach-omap2/board-zoom-peripherals.c
  *
+ * Dheeraj CVR "dhiru1602" <cvr.dheeraj@gmail.com>
  * Aditya Patange "Adi_Pat" <adithemagnificent@gmail.com>
- *
- * Mark "Hill Beast" Kennard <komcomputers@gmail.com>
- * crackerizer <github.com/crackerizer>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -21,6 +19,7 @@
 #include <linux/gpio.h>
 #include <linux/i2c-gpio.h>
 #include <linux/i2c/twl.h>
+#include <linux/regulator/consumer.h>
 #include <linux/regulator/machine.h>
 #include <linux/regulator/fixed.h>
 #include <linux/wl12xx.h>
@@ -361,13 +360,71 @@ static struct platform_device *latona_board_devices[] __initdata = {
 	&latona_led_device,         /* SAMSUNG LEDs */ 
 };
 
+static int adc_vs_lux_table[][2] = {
+	{ 2, 8 },
+	{ 5, 10 },
+	{ 8, 45 },
+	{ 10, 69 },
+	{ 12, 79 },
+	{ 22, 102 },
+	{ 30, 159 },
+	{ 50, 196 },
+	{ 75, 200 },
+	{ 110, 245 },
+	{ 150, 295 },
+	{ 170, 307 },
+	{ 300, 326 },
+	{ 460, 378 },
+	{ 1000, 463 },
+	{ 1500, 500 },
+	{ 1700, 515 },
+	{ 2000, 526 },
+	{ 2850, 561 },
+	{ 3450, 570 },
+	{ 6000, 603 },
+	{ 11000, 648 },    /* lux, adc value */
+	{ 0, 0, }
+};
+
+static int gp2a_light_adc_to_lux(int adc_val)
+{
+	int i;
+	int lux = 11000;
+
+	for (i = 0; adc_vs_lux_table[i+1][0] > 0; i++) {
+		// in case the adc value is smaller than 30 lux
+		if (adc_val < adc_vs_lux_table[i][1]) {
+			lux = adc_vs_lux_table[i][0] * adc_val / adc_vs_lux_table[i][1];
+			break;
+		}
+
+		if (adc_val >= adc_vs_lux_table[i][1] && adc_val < adc_vs_lux_table[i+1][1]) {
+			lux = (adc_vs_lux_table[i+1][0] - adc_vs_lux_table[i][0]) /
+			      (adc_vs_lux_table[i+1][1] - adc_vs_lux_table[i][1]) * 
+			      (adc_val - adc_vs_lux_table[i][1]) +
+			      adc_vs_lux_table[i][0];
+			break;
+		}
+	}
+	return lux;
+}
+
 static int gp2a_light_adc_value(void)
 {
-	return twl4030_get_madc_conversion(GP2A_LIGHT_ADC_CHANNEL);
+	return gp2a_light_adc_to_lux(twl4030_get_madc_conversion(GP2A_LIGHT_ADC_CHANNEL));
 }
 
 static void gp2a_power(bool on)
 {
+	struct regulator *usb3v1;
+
+	usb3v1 = regulator_get(NULL, "usb3v1");
+
+	if (on)
+		regulator_enable(usb3v1);
+	else
+		regulator_disable(usb3v1);
+
 	/* this controls the power supply rail to the gp2a IC */
 	gpio_set_value(OMAP_GPIO_ALS_EN, on);
 }
@@ -631,7 +688,7 @@ static struct mxt_platform_data latona_mxt_platform_data = {
 	.orient         = MXT_DIAGONAL,
 	.irqflags       = IRQF_TRIGGER_FALLING,
 	.key_codes	= latona_mxt_key_codes,
-	.lcden_gpio	= OMAP_GPIO_TOUCH_EN,
+	.tsp_en_gpio	= OMAP_GPIO_TOUCH_EN,
 };
 
 static struct i2c_board_info __initdata latona_i2c_bus2_info[] = {

@@ -184,6 +184,7 @@
 #define MXT_CAL_TIME		25	/* msec */
 
 #define MXT_FWRESET_TIME	175	/* msec */
+#define MXT_WAKEUP_TIME		25	/* msec */
 
 /* Command to unlock bootloader */
 #define MXT_UNLOCK_CMD_MSB	0xaa
@@ -397,6 +398,8 @@ static int __mxt_read_reg(struct i2c_client *client,
 {
 	struct i2c_msg xfer[2];
 	u8 buf[2];
+	int ret;
+	bool retry = false;
 
 	buf[0] = reg & 0xff;
 	buf[1] = (reg >> 8) & 0xff;
@@ -413,9 +416,19 @@ static int __mxt_read_reg(struct i2c_client *client,
 	xfer[1].len = len;
 	xfer[1].buf = val;
 
-	if (i2c_transfer(client->adapter, xfer, 2) != 2) {
-		dev_err(&client->dev, "%s: i2c transfer failed\n", __func__);
-		return -EIO;
+retry_read:
+	ret = i2c_transfer(client->adapter, xfer, ARRAY_SIZE(xfer));
+	if (ret != ARRAY_SIZE(xfer)) {
+		if (!retry) {
+			dev_dbg(&client->dev, "%s: i2c retry\n", __func__);
+			msleep(MXT_WAKEUP_TIME);
+			retry = true;
+			goto retry_read;
+		} else {
+			dev_err(&client->dev, "%s: i2c transfer failed (%d)\n",
+				__func__, ret);
+			return -EIO;
+		}
 	}
 
 	return 0;
@@ -426,20 +439,47 @@ static int mxt_read_reg(struct i2c_client *client, u16 reg, u8 *val)
 	return __mxt_read_reg(client, reg, 1, val);
 }
 
-static int mxt_write_reg(struct i2c_client *client, u16 reg, u8 val)
+static int __mxt_write_reg(struct i2c_client *client, u16 reg, u16 len,
+			   const void *val)
 {
-	u8 buf[3];
+	u8 *buf;
+	size_t count;
+	int ret;
+	bool retry = false;
+
+	count = len + 2;
+	buf = kmalloc(count, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
 
 	buf[0] = reg & 0xff;
 	buf[1] = (reg >> 8) & 0xff;
-	buf[2] = val;
+	memcpy(&buf[2], val, len);
 
-	if (i2c_master_send(client, buf, 3) != 3) {
-		dev_err(&client->dev, "%s: i2c send failed\n", __func__);
-		return -EIO;
+retry_write:
+	ret = i2c_master_send(client, buf, count);
+	if (ret == count) {
+		ret = 0;
+	} else {
+		if (!retry) {
+			dev_dbg(&client->dev, "%s: i2c retry\n", __func__);
+			msleep(MXT_WAKEUP_TIME);
+			retry = true;
+			goto retry_write;
+		} else {
+			dev_err(&client->dev, "%s: i2c send failed (%d)\n",
+				__func__, ret);
+			ret = -EIO;
+		}
 	}
 
-	return 0;
+	kfree(buf);
+	return ret;
+}
+
+static int mxt_write_reg(struct i2c_client *client, u16 reg, u8 val)
+{
+	return __mxt_write_reg(client, reg, 1, &val);
 }
 
 static int mxt_read_object_table(struct i2c_client *client,
@@ -631,6 +671,17 @@ static void mxt_handle_key_array(struct mxt_data *data,
 	}
 
 	data->keyarray_old = data->keyarray_new;
+}
+
+static void mxt_release_all(struct mxt_data *data)
+{
+	int id;
+
+	for (id = 0; id < MXT_MAX_FINGER; id++)
+		if (data->finger[id].status)
+			data->finger[id].status = MXT_RELEASE;
+
+	mxt_input_report(data, 0);
 }
 
 static irqreturn_t mxt_interrupt(int irq, void *dev_id)
@@ -1151,6 +1202,7 @@ static int mxt_suspend(struct device *dev)
 	struct input_dev *input_dev = data->input_dev;
 
 	disable_irq(data->irq);
+	mxt_release_all(data);
 
 	mutex_lock(&input_dev->mutex);
 
@@ -1159,7 +1211,7 @@ static int mxt_suspend(struct device *dev)
 
 	mutex_unlock(&input_dev->mutex);
 
-	gpio_direction_output(data->pdata->lcden_gpio, 0);
+	gpio_direction_output(data->pdata->tsp_en_gpio, 0);
 
 #ifdef CONFIG_LEDS_LATONA
 	latona_leds_report_event(KEY_POWER, 0);
@@ -1175,7 +1227,7 @@ static int mxt_resume(struct device *dev)
 	struct input_dev *input_dev = data->input_dev;
 	int ret;
 	
-	gpio_direction_output(data->pdata->lcden_gpio, 1);
+	gpio_direction_output(data->pdata->tsp_en_gpio, 1);
 	msleep(MXT_ENABLE_TIME);
 
 	/* Send a calibration command on System Resume */
@@ -1261,13 +1313,13 @@ static int __devinit mxt_probe(struct i2c_client *client,
 	data->irq = client->irq;
 
 	/* configure touchscreen enable gpio */
-	error = gpio_request(pdata->lcden_gpio, "atmel_en_gpio");
+	error = gpio_request(pdata->tsp_en_gpio, "atmel_en_gpio");
 	if (error) {
 		dev_err(&client->dev, "unable to request gpio [%d]\n",
-					pdata->lcden_gpio);
+					pdata->tsp_en_gpio);
 		goto err_free_mem;
 	} else {
-		gpio_direction_output(pdata->lcden_gpio, 1);
+		gpio_direction_output(pdata->tsp_en_gpio, 1);
 		msleep(MXT_ENABLE_TIME);
 	}
 
@@ -1357,8 +1409,8 @@ static int __devexit mxt_remove(struct i2c_client *client)
 	sysfs_remove_group(&client->dev.kobj, &mxt_attr_group);
 	free_irq(data->irq, data);
 
-	if (gpio_is_valid(data->pdata->lcden_gpio))
-		gpio_free(data->pdata->lcden_gpio);
+	if (gpio_is_valid(data->pdata->tsp_en_gpio))
+		gpio_free(data->pdata->tsp_en_gpio);
 
 	input_unregister_device(data->input_dev);
 #if defined(CONFIG_HAS_EARLYSUSPEND)

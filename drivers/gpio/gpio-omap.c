@@ -1716,11 +1716,10 @@ int omap2_gpio_prepare_for_idle(int off_mode, bool suspend)
 			continue;
 
 		if (bank->loses_context)
-			if (bank->id != 5) /*IPC_SPI Workaround for SDRY GPIO. Disable RUNTIME PM on GPIO Bank 5.*/
-				if (pm_runtime_put_sync_suspend(bank->dev) < 0)
-					dev_err(bank->dev, "%s: GPIO bank %d "
-							"pm_runtime_put_sync failed\n",
-							__func__, bank->id);
+			if (pm_runtime_put_sync_suspend(bank->dev) < 0)
+				dev_err(bank->dev, "%s: GPIO bank %d "
+						"pm_runtime_put_sync failed\n",
+						__func__, bank->id);
 	}
 
 	if (ret)
@@ -1739,11 +1738,10 @@ void omap2_gpio_resume_after_idle(int off_mode)
 			continue;
 
 		if (bank->loses_context)
-			if (bank->id != 5) /*IPC_SPI Workaround for SDRY GPIO. Disable RUNTIME PM on GPIO Bank 5.*/
-				if (pm_runtime_get_sync(bank->dev) < 0)
-					dev_err(bank->dev, "%s: GPIO bank %d "
-							"pm_runtime_get_sync failed\n",
-							__func__, bank->id);
+			if (pm_runtime_get_sync(bank->dev) < 0)
+				dev_err(bank->dev, "%s: GPIO bank %d "
+						"pm_runtime_get_sync failed\n",
+						__func__, bank->id);
 
 		omap2_gpio_restore_edge_wakeup(bank);
 
@@ -1840,6 +1838,7 @@ static void omap3_gpio_save_pad_context(void)
 
 	list_for_each_entry(bank, &omap_gpio_list, node) {
 
+		omap_gpio_save_context(bank);
 		tmp_oe[i] = bank->context.oe;
 		gbank_gpio_oe[i] = bank->context.oe;
 		gpio_bank[i] = bank;

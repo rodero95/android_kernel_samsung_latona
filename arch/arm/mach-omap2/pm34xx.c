@@ -93,9 +93,6 @@ static int (*_omap_save_secure_sram)(u32 *addr);
 static struct powerdomain *mpu_pwrdm, *neon_pwrdm;
 static struct powerdomain *core_pwrdm, *per_pwrdm;
 static struct powerdomain *cam_pwrdm;
-#ifdef CONFIG_MACH_OMAP_LATONA
-static struct powerdomain *dss_pwrdm;
-#endif
 
 static void omap3_enable_io_chain(void)
 {
@@ -383,10 +380,12 @@ void omap_sram_idle(bool suspend)
 	int per_going_off;
 	int core_prev_state, per_prev_state;
 	u32 sdrc_pwr = 0;
-#ifdef CONFIG_MACH_OMAP_LATONA
-	int dss_next_state = PWRDM_POWER_ON;
-	int dss_state_modified = 0;
-#endif
+	int cam_fclken;
+	int dss_fclken;
+	int sgx_fclken;
+	int usb_fclken;
+	int iva2_idlest;
+	int dma_idlest;
 
 	if (!_omap_sram_idle)
 		return;
@@ -395,9 +394,6 @@ void omap_sram_idle(bool suspend)
 	pwrdm_clear_all_prev_pwrst(neon_pwrdm);
 	pwrdm_clear_all_prev_pwrst(core_pwrdm);
 	pwrdm_clear_all_prev_pwrst(per_pwrdm);
-#ifdef CONFIG_MACH_OMAP_LATONA
-	pwrdm_clear_all_prev_pwrst(dss_pwrdm);
-#endif
 
 	mpu_next_state = pwrdm_read_next_pwrst(mpu_pwrdm);
 	switch (mpu_next_state) {
@@ -422,9 +418,6 @@ void omap_sram_idle(bool suspend)
 	/* Enable IO-PAD and IO-CHAIN wakeups */
 	per_next_state = pwrdm_read_next_pwrst(per_pwrdm);
 	core_next_state = pwrdm_read_next_pwrst(core_pwrdm);
-#ifdef CONFIG_MACH_OMAP_LATONA
-	dss_next_state = pwrdm_read_next_pwrst(dss_pwrdm);
-#endif
 	if (omap3_has_io_wakeup() &&
 	    (per_next_state < PWRDM_POWER_ON ||
 	     core_next_state < PWRDM_POWER_ON)) {
@@ -434,30 +427,48 @@ void omap_sram_idle(bool suspend)
 
 	pwrdm_pre_transition();
 
-#ifdef CONFIG_MACH_OMAP_LATONA
-	/* DSS */
-	if(dss_next_state < PWRDM_POWER_ON){
-		if(dss_next_state == PWRDM_POWER_OFF){
-			if(core_next_state == PWRDM_POWER_ON){
-				dss_next_state = PWRDM_POWER_RET;
-				pwrdm_set_next_pwrst(dss_pwrdm, dss_next_state);
-				dss_state_modified = 1;
-			}
-			/* allow dss sleep */
-			clkdm_add_sleepdep(dss_pwrdm->pwrdm_clkdms[0],
-					mpu_pwrdm->pwrdm_clkdms[0]);
-		}else{
-			dss_next_state = PWRDM_POWER_RET;
-			pwrdm_set_next_pwrst(dss_pwrdm, dss_next_state);
+	/*
+	 * Hardware maintains sleep dependencies which will keep the core
+	 * domain from sleeping if certain other domains are active.  However,
+	 * we will be making decisions based on what core is doing.  For
+	 * example, should we call set_dpll3_volt_freq() or not.  So let's
+	 * find out what core will really do.
+	 */
+	if (core_next_state < PWRDM_POWER_ON) {
+		cam_fclken = omap2_cm_read_mod_reg(OMAP3430_CAM_MOD, CM_FCLKEN);
+		dss_fclken = omap2_cm_read_mod_reg(OMAP3430_DSS_MOD, CM_FCLKEN);
+		sgx_fclken = omap2_cm_read_mod_reg(OMAP3430ES2_SGX_MOD,
+							CM_FCLKEN);
+		usb_fclken = omap2_cm_read_mod_reg(OMAP3430ES2_USBHOST_MOD,
+							CM_FCLKEN);
+		iva2_idlest = omap2_cm_read_mod_reg(OMAP3430_IVA2_MOD,
+							CM_IDLEST);
+		dma_idlest = omap2_cm_read_mod_reg(CORE_MOD, CM_IDLEST) &
+							OMAP3430_ST_SDMA_MASK;
+
+		if ((cam_fclken != 0) ||
+			(dss_fclken != 0) ||
+			(sgx_fclken != 0) ||
+			(usb_fclken != 0) ||
+			(iva2_idlest == 0) ||
+			(dma_idlest == 0)) {
+			core_next_state = PWRDM_POWER_ON;
+			pwrdm_set_next_pwrst(core_pwrdm, core_next_state);
 		}
 	}
-#endif
 
 	/* PER */
-	if (per_next_state < PWRDM_POWER_ON) {
+	if (per_next_state < PWRDM_POWER_ON && core_next_state < PWRDM_POWER_ON) {
 		per_going_off = (per_next_state == PWRDM_POWER_OFF) ? 1 : 0;
 		omap2_gpio_prepare_for_idle(per_going_off, suspend);
 	}
+
+#ifdef CONFIG_MACH_OMAP_LATONA
+	/* CORE */
+	if (core_next_state <= PWRDM_POWER_RET) {
+		omap3_save_scratchpad_contents();
+	}
+#endif
 
 	/* CORE */
 	if (core_next_state < PWRDM_POWER_ON) {
@@ -468,6 +479,11 @@ void omap_sram_idle(bool suspend)
 			omap3_core_save_context();
 			omap3_cm_save_context();
 
+#ifdef CONFIG_MACH_OMAP_LATONA
+			/* PATCH - Off mode issue on HS device */
+			if (omap_type() != OMAP2_DEVICE_TYPE_GP)
+				omap3_save_secure_ram_context();
+#endif
 		} else {
 			omap2_prm_set_mod_reg_bits(OMAP3430_AUTO_RET_MASK,
 						OMAP3430_GR_MOD,
@@ -536,23 +552,10 @@ void omap_sram_idle(bool suspend)
 	pwrdm_post_transition();
 
 	/* PER */
-	if (per_next_state < PWRDM_POWER_ON) {
+	if (per_next_state < PWRDM_POWER_ON && core_next_state < PWRDM_POWER_ON) {
 		per_prev_state = pwrdm_read_prev_pwrst(per_pwrdm);
 		omap2_gpio_resume_after_idle(per_going_off);
 	}
-
-#ifdef CONFIG_MACH_OMAP_LATONA
-	/* DSS */
-	if (dss_next_state < PWRDM_POWER_ON) {
-		if (dss_next_state == PWRDM_POWER_OFF){
-			/* return to the previous state. */
-			clkdm_del_sleepdep(dss_pwrdm->pwrdm_clkdms[0],
-					mpu_pwrdm->pwrdm_clkdms[0]);
-		}
-		if (dss_state_modified)
-			pwrdm_set_next_pwrst(dss_pwrdm, PWRDM_POWER_OFF);
-	}
-#endif
 
 	/* Disable IO-PAD and IO-CHAIN wakeup */
 	if (omap3_has_io_wakeup() &&
@@ -617,6 +620,14 @@ static int omap3_pm_suspend(void)
 		if (pwrdm_clear_all_prev_pwrst(pwrst->pwrdm))
 			goto restore;
 	}
+
+#ifdef CONFIG_MACH_OMAP_LATONA
+//idle current optimisation
+		omap_writel(omap_readl(0x48004E00)|0x0,0x48004E00);     //CM_FCLKEN_DSS->EN_DSS1
+		omap_writel(omap_readl(0x48004E10)|0x0, 0x48004E10);     //CM_ICLKEN_DSS->EN_DSS1
+		omap_writel((omap_readl(0x48004E44) |0x2), 0x48004E44); // CM_SLEEPDEP_DSS
+//idle current optimisation
+#endif
 
 	omap3_intc_suspend();
 
@@ -1014,6 +1025,23 @@ static int __init omap3_pm_init(void)
 		omap3630_ctrl_disable_rta();
 
 	clkdm_add_wkdep(neon_clkdm, mpu_clkdm);
+	/*
+	 * Part of fix for errata i468.
+	 * GPIO pad spurious transition (glitch/spike) upon wakeup
+	 * from SYSTEM OFF mode.
+	 */
+	if (omap_rev() <= OMAP3630_REV_ES1_2) {
+		struct clockdomain *wkup_clkdm;
+
+		clkdm_add_wkdep(per_clkdm, core_clkdm);
+
+		/* Also part of fix for errata i582. */
+		wkup_clkdm = clkdm_lookup("wkup_clkdm");
+		if (wkup_clkdm)
+			clkdm_add_wkdep(per_clkdm, wkup_clkdm);
+		else
+			printk(KERN_ERR "%s: failed to look up wkup clock ""domain\n", __func__);
+	}
 	if (omap_type() != OMAP2_DEVICE_TYPE_GP) {
 		omap3_secure_ram_storage =
 			kmalloc(0x803F, GFP_KERNEL);
