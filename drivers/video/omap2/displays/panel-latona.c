@@ -278,7 +278,6 @@ static int nt35510_panel_resume(struct omap_dss_device *dssdev)
 	int r;
 
 	dev_dbg(&dssdev->dev, "panel resume\n");
-	printk("PANEL resume\n");
 
 	//necessary?
 	spi_setup(nt35510lcd_spi);
@@ -294,7 +293,6 @@ static int nt35510_panel_resume(struct omap_dss_device *dssdev)
 	if (r) {
 		dssdev->state = OMAP_DSS_DISPLAY_DISABLED;
 	} else {
-		printk("PANEL GPIO\n");
 		gpio_set_value(OMAP_GPIO_LCD_EN_SET, GPIO_LEVEL_LOW);
 		mdelay(1);
 		gpio_set_value(OMAP_GPIO_LCD_EN_SET, GPIO_LEVEL_HIGH);
@@ -1501,7 +1499,7 @@ void nt35510_lcd_poweroff(void)
 	// turn OFF VDD3 (1.8V)
 	nt35510_lcd_LDO_off();
 
-#if 0
+#if 1
 	omap_mux_init_signal("mcspi1_clk", OMAP_MUX_MODE7 | OMAP_PIN_INPUT_PULLDOWN);
 	omap_mux_init_signal("mcspi1_simo",  OMAP_MUX_MODE7 | OMAP_PIN_INPUT_PULLDOWN);
 	omap_mux_init_signal("mcspi1_somi", OMAP_MUX_MODE7 | OMAP_PIN_INPUT_PULLDOWN);
@@ -1511,7 +1509,7 @@ void nt35510_lcd_poweroff(void)
 
 void nt35510_lcd_poweron()
 {
-#if 0
+#if 1
 	omap_mux_init_signal("mcspi1_clk", OMAP_MUX_MODE0 | OMAP_PIN_INPUT_PULLUP);
 	omap_mux_init_signal("mcspi1_simo", OMAP_MUX_MODE0 | OMAP_PIN_INPUT_PULLDOWN);
 	omap_mux_init_signal("mcspi1_somi", OMAP_MUX_MODE0 | OMAP_PIN_INPUT_PULLDOWN);
