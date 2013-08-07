@@ -239,7 +239,7 @@ static char *latona_charger_supplied_to[] = {
 // Latona specific battery percentage calibration
 static void latona_adjust_soc(int *soc_value)
 {
-	int value = soc_value;
+	int value = *soc_value;
 
 	if(value == 100)
 		value = 100;
