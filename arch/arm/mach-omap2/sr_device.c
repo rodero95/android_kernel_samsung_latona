@@ -39,6 +39,45 @@ static struct omap_device_pm_latency omap_sr_latency[] = {
 	},
 };
 
+#ifdef CONFIG_LATONA_OPP5_ENABLED
+#define GAIN_MAXLIMIT	16
+#define R_MAXLIMIT	256
+
+#define NVALUERECIPROCAL_SENPGAIN_SHIFT	20
+#define NVALUERECIPROCAL_SENNGAIN_SHIFT	16
+#define NVALUERECIPROCAL_RNSENP_SHIFT	8
+#define NVALUERECIPROCAL_RNSENN_SHIFT	0
+
+static __init void cal_reciprocal(u32 sensor, u32 *sengain, u32 *rnsen)
+{
+	u32 gn, rn, mul;
+
+	for (gn = 0; gn < GAIN_MAXLIMIT; gn++) {
+		mul = 1 << (gn + 8);
+		rn = mul / sensor;
+		if (rn < R_MAXLIMIT) {
+			*sengain = gn;
+			*rnsen = rn;
+		}
+	}
+}
+
+static __init u32 cal_opp5_nvalue(u32 sennval, u32 senpval)
+{
+	u32 senpgain, senngain;
+	u32 rnsenp, rnsenn;
+
+	/* Calculating the gain and reciprocal of the SenN and SenP values */
+	cal_reciprocal(senpval, &senpgain, &rnsenp);
+	cal_reciprocal(sennval, &senngain, &rnsenn);
+
+	return (senpgain << NVALUERECIPROCAL_SENPGAIN_SHIFT) |
+		(senngain << NVALUERECIPROCAL_SENNGAIN_SHIFT) |
+		(rnsenp << NVALUERECIPROCAL_RNSENP_SHIFT) |
+		(rnsenn << NVALUERECIPROCAL_RNSENN_SHIFT);
+}
+#endif
+
 /* Read EFUSE values from control registers for OMAP3430 */
 static void __init sr_set_nvalues(struct omap_volt_data *volt_data,
 				struct omap_sr_data *sr_data)
@@ -54,6 +93,14 @@ static void __init sr_set_nvalues(struct omap_volt_data *volt_data,
 
 	for (i = 0; i < count; i++) {
 		u32 v;
+
+#ifdef CONFIG_LATONA_OPP5_ENABLED
+		/* The Latona board does not have an eFuse for OPP5.
+		 * We have to calculate a rough approximation of the nValue for this OPP. */
+		if (i == 4) {
+			v = cal_opp5_nvalue(2025, 1750);
+		} else
+#endif
 		/*
 		 * In OMAP4 the efuse registers are 24 bit aligned.
 		 * A __raw_readl will fail for non-32 bit aligned address
