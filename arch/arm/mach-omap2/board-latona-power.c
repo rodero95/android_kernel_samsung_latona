@@ -242,10 +242,8 @@ static char *latona_charger_supplied_to[] = {
 };
 
 // Latona specific battery percentage calibration
-static void latona_adjust_soc(int *soc_value)
+static int latona_adjust_soc(int value)
 {
-	int value = *soc_value;
-
 	if(value == 100)
 		value = 100;
 	else if(value < 30)
@@ -258,7 +256,7 @@ static void latona_adjust_soc(int *soc_value)
 	if(value > 100)
 		value = 100;
 
-	*soc_value = value;
+	return value;
 }
 
 static const __initdata struct pda_power_pdata charger_pdata = {
