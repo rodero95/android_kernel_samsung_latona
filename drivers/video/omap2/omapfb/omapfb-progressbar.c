@@ -19,6 +19,10 @@
 #define TRUE    1
 #define FALSE   0
 
+#ifdef CONFIG_MACH_OMAP_LATONA
+extern u32 latona_bootmode;
+#endif
+
 static int progress_flag = FALSE;
 static int progress_pos;
 static struct timer_list progress_timer;
@@ -105,6 +109,12 @@ void omapfb_start_progress(struct fb_info *fb)
 {
 	int x_pos;
 
+#ifdef CONFIG_MACH_OMAP_LATONA
+	// don't show the progress bar for charging mode
+	if (latona_bootmode == 5)
+		return;
+#endif
+
 	if (!show_progress)
 		return;
 
@@ -177,6 +187,12 @@ static void progress_timer_handler(unsigned long data)
 	if (progress_pos + PROGRESS_BAR_WIDTH >= PROGRESS_BAR_RIGHT_POS ) {        
 	        omapfb_stop_progress();    
 	} else {
+#ifdef CONFIG_MACH_OMAP_LATONA
+		// faster progressbar for recovery
+		if (latona_bootmode == 2)
+			progress_timer.expires = (get_jiffies_64() + (HZ/40));         
+		else
+#endif
 		progress_timer.expires = (get_jiffies_64() + (HZ/20));
 		progress_timer.function = progress_timer_handler;
 		add_timer(&progress_timer);
