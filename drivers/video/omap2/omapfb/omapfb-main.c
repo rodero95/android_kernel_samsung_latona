@@ -37,6 +37,10 @@
 
 #include "omapfb.h"
 
+#ifdef CONFIG_FB_OMAP2_PROGRESS_BAR
+#include "omapfb-progressbar.h"
+#endif
+
 #define MODULE_NAME     "omapfb"
 
 #define OMAPFB_PLANE_XRES_MIN		8
@@ -2299,6 +2303,11 @@ static int omapfb_init_display(struct omapfb2_device *fbdev,
 			}
 		}
 	}
+
+#ifdef CONFIG_FB_OMAP2_PROGRESS_BAR
+	if (fbdev)
+		omapfb_start_progress(fbdev->fbs[0]);
+#endif
 
 	return 0;
 }

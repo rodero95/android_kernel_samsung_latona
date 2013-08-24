@@ -242,10 +242,8 @@ static char *latona_charger_supplied_to[] = {
 };
 
 // Latona specific battery percentage calibration
-static void latona_adjust_soc(int *soc_value)
+static int latona_adjust_soc(int value)
 {
-	int value = *soc_value;
-
 	if(value == 100)
 		value = 100;
 	else if(value < 30)
@@ -258,7 +256,7 @@ static void latona_adjust_soc(int *soc_value)
 	if(value > 100)
 		value = 100;
 
-	*soc_value = value;
+	return value;
 }
 
 static const __initdata struct pda_power_pdata charger_pdata = {
@@ -277,7 +275,7 @@ static struct max17040_platform_data max17040_pdata = {
 	.charger_enable = charger_is_charging,
 	.allow_charging = charger_set_only_charge,
 	.skip_reset = true,
-	.min_capacity = 3,
+	.min_capacity = 2,
 	.is_full_charge = check_charge_full,
 	.adjust_soc = latona_adjust_soc,
 	.get_bat_temp = get_bat_temp_by_adc,
