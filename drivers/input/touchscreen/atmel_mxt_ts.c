@@ -1221,13 +1221,73 @@ static ssize_t mxt_update_fw_store(struct device *dev,
 }
 
 static DEVICE_ATTR(calibrate, 0664, NULL, mxt_calibrate_store);
+static ssize_t mxt_threshold_screen_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	struct mxt_data *data = dev_get_drvdata(dev);
+	u8 threshold;
+
+	mxt_read_object(data, MXT_TOUCH_MULTI,
+		MXT_TOUCH_TCHTHR, &threshold);
+	return snprintf(buf, PAGE_SIZE, "%d\n", threshold);
+}
+
+static ssize_t mxt_threshold_screen_store(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct mxt_data *data = dev_get_drvdata(dev);
+	u8 threshold;
+
+	if (sscanf(buf, "%d", &threshold) < 0)
+		return -EINVAL;
+
+	mxt_write_object(data, MXT_TOUCH_MULTI,
+			MXT_TOUCH_TCHTHR, threshold);
+
+	return count;
+}
+
+static ssize_t mxt_threshold_keys_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	struct mxt_data *data = dev_get_drvdata(dev);
+	u8 threshold;
+
+	mxt_read_object(data, MXT_TOUCH_KEYARRAY,
+		MXT_TOUCH_TCHTHR, &threshold);
+	return snprintf(buf, PAGE_SIZE, "%d\n", threshold);
+}
+
+static ssize_t mxt_threshold_keys_store(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct mxt_data *data = dev_get_drvdata(dev);
+	u8 threshold;
+
+	if (sscanf(buf, "%d", &threshold) < 0)
+		return -EINVAL;
+
+	mxt_write_object(data, MXT_TOUCH_KEYARRAY,
+			MXT_TOUCH_TCHTHR, threshold);
+
+	return count;
+}
+
 static DEVICE_ATTR(object, 0444, mxt_object_show, NULL);
 static DEVICE_ATTR(update_fw, 0664, NULL, mxt_update_fw_store);
+static DEVICE_ATTR(threshold_screen, 0644,
+	mxt_threshold_screen_show, mxt_threshold_screen_store);
+static DEVICE_ATTR(threshold_keys, 0644,
+	mxt_threshold_keys_show, mxt_threshold_keys_store);
 
 static struct attribute *mxt_attrs[] = {
 	&dev_attr_calibrate.attr,
 	&dev_attr_object.attr,
 	&dev_attr_update_fw.attr,
+	&dev_attr_threshold_screen.attr,
+	&dev_attr_threshold_keys.attr,
 	NULL
 };
 
