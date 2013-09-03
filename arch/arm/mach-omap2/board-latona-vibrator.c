@@ -52,6 +52,8 @@ static struct vibrator {
 	struct omap_dm_timer *gptimer;
 	bool enabled;
 	unsigned gpio_en;
+	unsigned long pwmval;
+	unsigned long oldpwmval;
 } vibdata;
 
 static ssize_t pwm_value_show(struct device *dev,
@@ -73,7 +75,7 @@ ssize_t pwm_value_store(struct device *dev,
 		const char *buf, size_t size)
 {
 
-	if (kstrtoul(buf, 0, &pwmval))
+	if (kstrtoul(buf, 0, &vibdata.pwmval))
 		pr_err("vibrator: error in storing pwm value\n");
 #if VIBRATOR_DEBUG
 	pr_info("vibrator: pwm value: %lu\n", pwmval);
@@ -146,6 +148,8 @@ static int pwm_set(unsigned long force)
 	pr_info("vibrator: pwm_set force=%lu\n", force);
 #endif
 
+	pr_debug("vibrator: pwm_set force=%lu\n", force);
+
 	if (unlikely(vibdata.gptimer == NULL))
 		return -EINVAL;
 
@@ -206,11 +210,11 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
         pwmval = LEVEL_MIN;
     }
 
-    /* set the current pwmval */
-    if (pwmval != oldpwmval) {
-        pwm_set(pwmval);
-        oldpwmval = pwmval;
-    }
+	/* set the current pwmval */
+	if (vibdata.pwmval != vibdata.oldpwmval) {
+		pwm_set(vibdata.pwmval);
+		vibdata.oldpwmval = vibdata.pwmval;
+	}
 
 	/* cancel previous timer and set GPIO according to value */
 	hrtimer_cancel(&vibdata.timer);
@@ -233,7 +237,7 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 			hrtimer_start(&vibdata.timer,
 				ns_to_ktime((u64)value * NSEC_PER_MSEC),
 				HRTIMER_MODE_REL);
-        }
+		}
 	} else {
 		vibrator_off();
 	}
@@ -256,9 +260,9 @@ static enum hrtimer_restart vibrator_timer_func(struct hrtimer *timer)
 static int __init vibrator_init(void)
 {
 	int ret;
-#if VIBRATOR_DEBUG
-	pr_info("vibrator_init()\n");
-#endif
+
+	pr_debug("vibrator_init()\n");
+
 	vibdata.enabled = false;
 
 	hrtimer_init(&vibdata.timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -271,12 +275,12 @@ static int __init vibrator_init(void)
 	ret = omap_dm_timer_set_source(vibdata.gptimer,
 		OMAP_TIMER_SRC_SYS_CLK);
 	if (ret < 0) {
-        pr_err("vibrator_init(): timer_set_source failed\n");
+		pr_err("vibrator_init(): timer_set_source failed\n");
 		goto err_dm_timer_src;
-    }
+	}
 
 	omap_dm_timer_set_load(vibdata.gptimer, 1, -PWM_DUTY_MAX);
-	omap_dm_timer_set_match(vibdata.gptimer, 1, -PWM_DUTY_MAX+10);
+	omap_dm_timer_set_match(vibdata.gptimer, 1, -PWM_DUTY_MAX+5);
 	omap_dm_timer_set_pwm(vibdata.gptimer, 0, 1,
 		OMAP_TIMER_TRIGGER_OVERFLOW_AND_COMPARE);
 	omap_dm_timer_enable(vibdata.gptimer);
@@ -288,10 +292,10 @@ static int __init vibrator_init(void)
 
 	ret = timed_output_dev_register(&to_dev);
 	if (ret < 0) {
-        pr_err("vibrator_init(): failed to register timed_output device\n");
+		pr_err("vibrator_init(): failed to register timed_output device\n");
 		goto err_to_dev_reg;
-    }
-    
+	}
+
 	    /* User controllable pwm level */
   ret = device_create_file(to_dev.dev, &dev_attr_pwm_value);
   if (ret < 0) {
@@ -335,9 +339,9 @@ err_dm_timer_src:
 static int __init omap3_latona_vibrator_init(void)
 {
 	int ret;
-#if VIBRATOR_DEBUG
-	pr_info("omap3_latona_vibrator_init()\n");
-#endif
+
+	pr_debug("omap3_latona_vibrator_init()\n");
+
 	vibdata.gpio_en = OMAP_GPIO_VIBTONE_EN;
 
 	omap_mux_init_gpio(vibdata.gpio_en, OMAP_PIN_OUTPUT |
