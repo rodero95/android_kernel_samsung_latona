@@ -33,18 +33,6 @@
 #define VIB_GPTIMER_NUM		10
 #define PWM_DUTY_MAX		1160
 
-#define VIBRATOR_DEBUG 0
-
-#define MAX_TIMEOUT      10000 /* 10s */
-
-#define LEVEL_MAX      127
-#define LEVEL_MIN      0
-#define LEVEL_DEFAULT    64
-#define LEVEL_THRESHOLD    96
-
-static unsigned long pwmval = LEVEL_DEFAULT;
-static unsigned long oldpwmval;
-
 static struct vibrator {
 	struct wake_lock wklock;
 	struct hrtimer timer;
@@ -62,10 +50,8 @@ static ssize_t pwm_value_show(struct device *dev,
 
 	int count;
 
-	count = sprintf(buf, "%lu\n", pwmval);
-#if VIBRATOR_DEBUG
-	pr_info("vibrator: pwm value: %lu\n", pwmval);
-#endif
+	count = sprintf(buf, "%lu\n", vibdata.pwmval);
+	pr_debug("vibrator: pwmval: %lu\n", vibdata.pwmval);
 
 	return count;
 }
@@ -77,9 +63,8 @@ ssize_t pwm_value_store(struct device *dev,
 
 	if (kstrtoul(buf, 0, &vibdata.pwmval))
 		pr_err("vibrator: error in storing pwm value\n");
-#if VIBRATOR_DEBUG
-	pr_info("vibrator: pwm value: %lu\n", pwmval);
-#endif
+	pr_debug("vibrator: pwmval: %lu\n", vibdata.pwmval);
+
 	return size;
 }
 static DEVICE_ATTR(pwm_value, S_IRUGO | S_IWUSR,
@@ -143,10 +128,6 @@ static DEVICE_ATTR(pwm_threshold, S_IRUGO | S_IWUSR,
 
 static int pwm_set(unsigned long force)
 {
-    int pwm_duty;
-#if VIBRATOR_DEBUG
-	pr_info("vibrator: pwm_set force=%lu\n", force);
-#endif
 
 	pr_debug("vibrator: pwm_set force=%lu\n", force);
 
@@ -203,12 +184,12 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 {
 	mutex_lock(&vibdata.lock);
 
-    /* make sure pwmval is between 0 and 127 */
-    if(pwmval > LEVEL_MAX) {
-        pwmval = LEVEL_MAX;
-    } else if (pwmval < LEVEL_MIN) {
-        pwmval = LEVEL_MIN;
-    }
+	/* make sure pwmval is between 0 and 127 */
+	if (vibdata.pwmval > 127) {
+		vibdata.pwmval = 127;
+	} else if (vibdata.pwmval < 0) {
+		vibdata.pwmval = 0;
+	}
 
 	/* set the current pwmval */
 	if (vibdata.pwmval != vibdata.oldpwmval) {
@@ -220,9 +201,8 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 	hrtimer_cancel(&vibdata.timer);
 
 	if (value) {
-#if VIBRATOR_DEBUG
-        pr_info("vibrator: value=%d, pwm value=%lu\n", value, pwmval);
-#endif
+		pr_debug("vibrator: value=%d, pwmval=%lu\n", value, vibdata.pwmval);
+
 		wake_lock(&vibdata.wklock);
 
 		gpio_set_value(vibdata.gpio_en, 1);
