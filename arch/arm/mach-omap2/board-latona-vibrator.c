@@ -32,6 +32,12 @@
 
 #define VIB_GPTIMER_NUM		10
 #define PWM_DUTY_MAX		1160
+#define MAX_TIMEOUT      10000 /* 10s */
+
+#define LEVEL_MAX      127
+#define LEVEL_MIN      0
+#define LEVEL_DEFAULT    64
+#define LEVEL_THRESHOLD    96
 
 static struct vibrator {
 	struct wake_lock wklock;
@@ -51,7 +57,7 @@ static ssize_t pwm_value_show(struct device *dev,
 	int count;
 
 	count = sprintf(buf, "%lu\n", vibdata.pwmval);
-	pr_debug("vibrator: pwmval: %lu\n", vibdata.pwmval);
+	pr_debug("vibrator: pwm value: %lu\n", vibdata.pwmval);
 
 	return count;
 }
@@ -63,7 +69,7 @@ ssize_t pwm_value_store(struct device *dev,
 
 	if (kstrtoul(buf, 0, &vibdata.pwmval))
 		pr_err("vibrator: error in storing pwm value\n");
-	pr_debug("vibrator: pwmval: %lu\n", vibdata.pwmval);
+	pr_debug("vibrator: pwm value: %lu\n", vibdata.pwmval);
 
 	return size;
 }
@@ -128,6 +134,7 @@ static DEVICE_ATTR(pwm_threshold, S_IRUGO | S_IWUSR,
 
 static int pwm_set(unsigned long force)
 {
+	int pwm_duty;
 
 	pr_debug("vibrator: pwm_set force=%lu\n", force);
 
@@ -185,10 +192,10 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 	mutex_lock(&vibdata.lock);
 
 	/* make sure pwmval is between 0 and 127 */
-	if (vibdata.pwmval > 127) {
-		vibdata.pwmval = 127;
-	} else if (vibdata.pwmval < 0) {
-		vibdata.pwmval = 0;
+	if(vibdata.pwmval > LEVEL_MAX) {
+        vibdata.pwmval = LEVEL_MAX;
+    } else if (vibdata.pwmval < LEVEL_MIN) {
+        vibdata.pwmval = LEVEL_MIN;
 	}
 
 	/* set the current pwmval */
@@ -201,7 +208,7 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 	hrtimer_cancel(&vibdata.timer);
 
 	if (value) {
-		pr_debug("vibrator: value=%d, pwmval=%lu\n", value, vibdata.pwmval);
+		pr_debug("vibrator: value=%d, pwm value=%lu\n", value, vibdata.pwmval);
 
 		wake_lock(&vibdata.wklock);
 
@@ -270,13 +277,16 @@ static int __init vibrator_init(void)
 	wake_lock_init(&vibdata.wklock, WAKE_LOCK_SUSPEND, "vibrator");
 	mutex_init(&vibdata.lock);
 
+	vibdata.pwmval = LEVEL_DEFAULT;
+	vibdata.oldpwmval = LEVEL_MIN;
+
 	ret = timed_output_dev_register(&to_dev);
 	if (ret < 0) {
 		pr_err("vibrator_init(): failed to register timed_output device\n");
 		goto err_to_dev_reg;
 	}
 
-	    /* User controllable pwm level */
+     /* User controllable pwm level */
   ret = device_create_file(to_dev.dev, &dev_attr_pwm_value);
   if (ret < 0) {
     pr_err("vibrator_init(): create sysfs fail: pwm_value\n");
@@ -302,7 +312,6 @@ static int __init vibrator_init(void)
     pr_err("vibrator_init(): create sysfs fail: pwm_threshold\n");
   }
 
-	
 	return 0;
 
 err_to_dev_reg:
