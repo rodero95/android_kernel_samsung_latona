@@ -86,6 +86,8 @@ struct v4l2_int_device {
 
 void v4l2_int_device_try_attach_all(void);
 
+struct v4l2_int_device *v4l2_int_device_dummy(void);
+
 int v4l2_int_device_register(struct v4l2_int_device *d);
 void v4l2_int_device_unregister(struct v4l2_int_device *d);
 
@@ -102,6 +104,7 @@ enum v4l2_power {
 	V4L2_POWER_OFF = 0,
 	V4L2_POWER_ON,
 	V4L2_POWER_STANDBY,
+	V4L2_POWER_RESUME,
 };
 
 /* Slave interface type. */
@@ -176,6 +179,8 @@ enum v4l2_int_ioctl_num {
 	vidioc_int_s_fmt_cap_num,
 	vidioc_int_try_fmt_cap_num,
 	vidioc_int_queryctrl_num,
+	vidioc_int_deinit_num,
+	vidioc_int_querymenu_num,
 	vidioc_int_g_ctrl_num,
 	vidioc_int_s_ctrl_num,
 	vidioc_int_cropcap_num,
@@ -186,6 +191,11 @@ enum v4l2_int_ioctl_num {
 	vidioc_int_querystd_num,
 	vidioc_int_s_std_num,
 	vidioc_int_s_video_routing_num,
+	vidioc_int_streamon_num, 
+        vidioc_int_streamoff_num,
+        vidioc_int_s_strobe_num, 
+        vidioc_int_g_strobe_num,
+        vidioc_int_g_exif_num,
 
 	/*
 	 *
@@ -228,6 +238,18 @@ enum v4l2_int_ioctl_num {
 	 *
 	 */
 	vidioc_int_priv_start_num = 2000,
+
+	/* VIDIOC_INT_PRIV_G_PIXCLK */
+	vidioc_int_priv_g_pixclk_num,
+	/* VIDIOC_INT_PRIV_G_ACTIVESIZE */
+	vidioc_int_priv_g_activesize_num,
+	/* VIDIOC_INT_PRIV_G_FULLSIZE */
+	vidioc_int_priv_g_fullsize_num,
+	/* VIDIOC_INT_PRIV_G_PIXELSIZE */
+	vidioc_int_priv_g_pixelsize_num,
+	/* VIDIOC_INT_PRIV_G_PIXCLK_ACTIVE */
+	vidioc_int_priv_g_pixclk_active_num,
+
 };
 
 /*
@@ -280,6 +302,7 @@ V4L2_INT_WRAPPER_1(g_fmt_cap, struct v4l2_format, *);
 V4L2_INT_WRAPPER_1(s_fmt_cap, struct v4l2_format, *);
 V4L2_INT_WRAPPER_1(try_fmt_cap, struct v4l2_format, *);
 V4L2_INT_WRAPPER_1(queryctrl, struct v4l2_queryctrl, *);
+V4L2_INT_WRAPPER_1(querymenu, struct v4l2_querymenu, *);
 V4L2_INT_WRAPPER_1(g_ctrl, struct v4l2_control, *);
 V4L2_INT_WRAPPER_1(s_ctrl, struct v4l2_control, *);
 V4L2_INT_WRAPPER_1(cropcap, struct v4l2_cropcap, *);
@@ -287,6 +310,11 @@ V4L2_INT_WRAPPER_1(g_crop, struct v4l2_crop, *);
 V4L2_INT_WRAPPER_1(s_crop, struct v4l2_crop, *);
 V4L2_INT_WRAPPER_1(g_parm, struct v4l2_streamparm, *);
 V4L2_INT_WRAPPER_1(s_parm, struct v4l2_streamparm, *);
+V4L2_INT_WRAPPER_0(streamon);
+V4L2_INT_WRAPPER_0(streamoff);
+V4L2_INT_WRAPPER_1(s_strobe, struct v4l2_strobe, *);
+V4L2_INT_WRAPPER_1(g_strobe, struct v4l2_strobe, *);
+V4L2_INT_WRAPPER_1(g_exif, struct v4l2_exif, *);
 V4L2_INT_WRAPPER_1(querystd, v4l2_std_id, *);
 V4L2_INT_WRAPPER_1(s_std, v4l2_std_id, *);
 V4L2_INT_WRAPPER_1(s_video_routing, struct v4l2_routing, *);
@@ -304,4 +332,10 @@ V4L2_INT_WRAPPER_0(reset);
 V4L2_INT_WRAPPER_0(init);
 V4L2_INT_WRAPPER_1(g_chip_ident, int, *);
 
+V4L2_INT_WRAPPER_0(deinit);
+V4L2_INT_WRAPPER_1(priv_g_pixclk, u32, *);
+V4L2_INT_WRAPPER_1(priv_g_activesize, struct v4l2_rect, *);
+V4L2_INT_WRAPPER_1(priv_g_fullsize, struct v4l2_rect, *);
+V4L2_INT_WRAPPER_1(priv_g_pixelsize, struct v4l2_rect, *);
+V4L2_INT_WRAPPER_1(priv_g_pixclk_active, u32, *);
 #endif

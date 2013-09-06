@@ -34,6 +34,10 @@ struct opp *opp_find_freq_floor(struct device *dev, unsigned long *freq);
 
 struct opp *opp_find_freq_ceil(struct device *dev, unsigned long *freq);
 
+struct opp *opp_find_volt_ceil(struct device *dev, unsigned long *volt);
+
+struct opp *opp_find_volt_floor(struct device *dev, unsigned long *volt);
+
 int opp_add(struct device *dev, unsigned long freq, unsigned long u_volt);
 
 int opp_enable(struct device *dev, unsigned long freq);
@@ -94,11 +98,19 @@ static inline int opp_disable(struct device *dev, unsigned long freq)
 #if defined(CONFIG_CPU_FREQ) && defined(CONFIG_PM_OPP)
 int opp_init_cpufreq_table(struct device *dev,
 			    struct cpufreq_frequency_table **table);
+void opp_free_cpufreq_table(struct device *dev,
+				struct cpufreq_frequency_table **table);
 #else
 static inline int opp_init_cpufreq_table(struct device *dev,
 			    struct cpufreq_frequency_table **table)
 {
 	return -EINVAL;
+}
+
+static inline
+void opp_free_cpufreq_table(struct device *dev,
+				struct cpufreq_frequency_table **table)
+{
 }
 #endif		/* CONFIG_CPU_FREQ */
 

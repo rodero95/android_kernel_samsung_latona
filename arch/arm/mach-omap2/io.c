@@ -38,11 +38,13 @@
 #include "io.h"
 
 #include <plat/omap-pm.h>
+#include "voltage.h"
 #include "powerdomain.h"
 
 #include "clockdomain.h"
 #include <plat/omap_hwmod.h>
 #include <plat/multi.h>
+#include <mach/tf_mshield.h>
 
 /*
  * The machine specific code may provide the extra mapping besides the
@@ -245,11 +247,17 @@ static void __init _omap2_map_common_io(void)
 	 * mdesc->map_io(), but we must also do it here because of the CPU
 	 * revision check below.
 	 */
+
+	omap_l2cache_enable();
+
 	local_flush_tlb_all();
 	flush_cache_all();
 
 	omap2_check_revision();
 	omap_sram_init();
+#ifdef CONFIG_SECURITY_MIDDLEWARE_COMPONENT
+	tf_allocate_workspace();
+#endif
 }
 
 #ifdef CONFIG_SOC_OMAP2420
@@ -355,18 +363,22 @@ void __init omap2_init_common_infrastructure(void)
 	u8 postsetup_state;
 
 	if (cpu_is_omap242x()) {
+		omap2xxx_voltagedomains_init();
 		omap2xxx_powerdomains_init();
 		omap2xxx_clockdomains_init();
 		omap2420_hwmod_init();
 	} else if (cpu_is_omap243x()) {
+		omap2xxx_voltagedomains_init();
 		omap2xxx_powerdomains_init();
 		omap2xxx_clockdomains_init();
 		omap2430_hwmod_init();
 	} else if (cpu_is_omap34xx()) {
+		omap3xxx_voltagedomains_init();
 		omap3xxx_powerdomains_init();
 		omap3xxx_clockdomains_init();
 		omap3xxx_hwmod_init();
 	} else if (cpu_is_omap44xx()) {
+		omap44xx_voltagedomains_init();
 		omap44xx_powerdomains_init();
 		omap44xx_clockdomains_init();
 		omap44xx_hwmod_init();
@@ -419,7 +431,9 @@ void __init omap2_init_common_devices(struct omap_sdrc_params *sdrc_cs0,
 {
 	if (cpu_is_omap24xx() || omap3_has_sdrc()) {
 		omap2_sdrc_init(sdrc_cs0, sdrc_cs1);
+#ifndef CONFIG_MACH_OMAP_LATONA
 		_omap2_init_reprogram_sdrc();
+#endif
 	}
 
 	omap_irq_base_init();

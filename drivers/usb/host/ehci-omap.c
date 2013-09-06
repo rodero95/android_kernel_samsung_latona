@@ -39,8 +39,14 @@
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/usb/ulpi.h>
-#include <plat/usb.h>
 #include <linux/regulator/consumer.h>
+#include <linux/pm_runtime.h>
+#include <linux/clk.h>
+
+#include <plat/omap_hwmod.h>
+#include <plat/usb.h>
+#include <plat/clock.h>
+#include <plat/omap-pm.h>
 
 /* EHCI Register Set */
 #define EHCI_INSNREG04					(0xA0)
@@ -66,6 +72,90 @@ static inline void ehci_write(void __iomem *base, u32 reg, u32 val)
 static inline u32 ehci_read(void __iomem *base, u32 reg)
 {
 	return __raw_readl(base + reg);
+}
+
+u8 omap_ehci_ulpi_read(const struct usb_hcd *hcd, u8 reg)
+{
+	unsigned reg_internal = 0;
+	u8 val;
+	int count = 2000;
+
+	reg_internal = ((reg) << EHCI_INSNREG05_ULPI_REGADD_SHIFT)
+			/* Write */
+			| (3 << EHCI_INSNREG05_ULPI_OPSEL_SHIFT)
+			/* PORTn */
+			| ((1) << EHCI_INSNREG05_ULPI_PORTSEL_SHIFT)
+			/* start ULPI access*/
+			| (1 << EHCI_INSNREG05_ULPI_CONTROL_SHIFT);
+
+	ehci_write(hcd->regs, EHCI_INSNREG05_ULPI, reg_internal);
+
+	/* Wait for ULPI access completion */
+	while ((ehci_read(hcd->regs, EHCI_INSNREG05_ULPI)
+			& (1 << EHCI_INSNREG05_ULPI_CONTROL_SHIFT))) {
+		udelay(1);
+		if (count-- == 0) {
+			pr_err("ehci: omap_ehci_ulpi_read: Error");
+			break;
+		}
+	}
+
+	val = ehci_read(hcd->regs, EHCI_INSNREG05_ULPI) & 0xFF;
+	return val;
+}
+
+int omap_ehci_ulpi_write(const struct usb_hcd *hcd, u8 val, u8 reg, u8 retry_times)
+{
+	unsigned reg_internal = 0;
+	int status = 0;
+	int count;
+
+again:
+	count = 2000;
+	reg_internal = val |
+			((reg) << EHCI_INSNREG05_ULPI_REGADD_SHIFT)
+			/* Write */
+			| (2 << EHCI_INSNREG05_ULPI_OPSEL_SHIFT)
+			/* PORTn */
+			| ((1) << EHCI_INSNREG05_ULPI_PORTSEL_SHIFT)
+			/* start ULPI access*/
+			| (1 << EHCI_INSNREG05_ULPI_CONTROL_SHIFT);
+
+	ehci_write(hcd->regs, EHCI_INSNREG05_ULPI, reg_internal);
+
+	/* Wait for ULPI access completion */
+	while ((ehci_read(hcd->regs, EHCI_INSNREG05_ULPI)
+			& (1 << EHCI_INSNREG05_ULPI_CONTROL_SHIFT))) {
+		udelay(1);
+		if (count-- == 0) {
+			if (retry_times--) {
+				ehci_write(hcd->regs, EHCI_INSNREG05_ULPI, 0);
+				goto again;
+			} else {
+				pr_err("ehci: omap_ehci_ulpi_write: Error");
+				status = -ETIMEDOUT;
+				break;
+			}
+		}
+	}
+	return status;
+}
+
+void omap_ehci_hw_phy_reset(const struct usb_hcd *hcd)
+{
+	struct device *dev = hcd->self.controller;
+	struct ehci_hcd_omap_platform_data  *pdata;
+
+	pdata = dev->platform_data;
+
+	if (gpio_is_valid(pdata->reset_gpio_port[0])) {
+		gpio_set_value(pdata->reset_gpio_port[0], 0);
+		mdelay(2);
+		gpio_set_value(pdata->reset_gpio_port[0], 1);
+		mdelay(2);
+	}
+
+	return;
 }
 
 static void omap_ehci_soft_phy_reset(struct platform_device *pdev, u8 port)
@@ -178,11 +268,7 @@ static int ehci_hcd_omap_probe(struct platform_device *pdev)
 		}
 	}
 
-	ret = omap_usbhs_enable(dev);
-	if (ret) {
-		dev_err(dev, "failed to start usbhs with err %d\n", ret);
-		goto err_enable;
-	}
+	pm_runtime_get_sync(dev->parent);
 
 	/*
 	 * An undocumented "feature" in the OMAP3 EHCI controller,
@@ -205,6 +291,8 @@ static int ehci_hcd_omap_probe(struct platform_device *pdev)
 	omap_ehci = hcd_to_ehci(hcd);
 	omap_ehci->sbrn = 0x20;
 
+	omap_ehci->has_smsc_ulpi_bug = 1;
+	omap_ehci->no_companion_port_handoff = 1;
 	/* we know this is the memory we want, no need to ioremap again */
 	omap_ehci->caps = hcd->regs;
 	omap_ehci->regs = hcd->regs
@@ -228,10 +316,7 @@ static int ehci_hcd_omap_probe(struct platform_device *pdev)
 	return 0;
 
 err_add_hcd:
-	omap_usbhs_disable(dev);
-
-err_enable:
-	usb_put_hcd(hcd);
+	pm_runtime_put_sync(dev->parent);
 
 err_io:
 	return ret;
@@ -252,25 +337,95 @@ static int ehci_hcd_omap_remove(struct platform_device *pdev)
 	struct usb_hcd *hcd	= dev_get_drvdata(dev);
 
 	usb_remove_hcd(hcd);
-	omap_usbhs_disable(dev);
+	pm_runtime_put_sync(dev->parent);
 	usb_put_hcd(hcd);
 	return 0;
 }
 
 static void ehci_hcd_omap_shutdown(struct platform_device *pdev)
 {
+	struct device *dev	= &pdev->dev;
 	struct usb_hcd *hcd = dev_get_drvdata(&pdev->dev);
 
-	if (hcd->driver->shutdown)
+	if (hcd->driver->shutdown) {
+		pm_runtime_get_sync(dev->parent);
 		hcd->driver->shutdown(hcd);
+		pm_runtime_put(dev->parent);
+	}
+}
+
+static int ehci_omap_bus_suspend(struct usb_hcd *hcd)
+{
+	struct device *dev = hcd->self.controller;
+	struct ehci_hcd_omap_platform_data  *pdata;
+	struct omap_hwmod	*oh;
+	struct clk *clk;
+	int ret = 0;
+	int i;
+
+	dev_dbg(dev, "ehci_omap_bus_suspend\n");
+
+	ret = ehci_bus_suspend(hcd);
+
+	if (ret != 0) {
+		dev_dbg(dev, "ehci_omap_bus_suspend failed %d\n", ret);
+		return ret;
+	}
+
+	oh = omap_hwmod_lookup(USBHS_EHCI_HWMODNAME);
+
+	omap_hwmod_enable_ioring_wakeup(oh);
+
+	if (dev->parent)
+		pm_runtime_put_sync(dev->parent);
+
+	/* At the end, disable any external transceiver clocks */
+	pdata = dev->platform_data;
+	for (i = 0 ; i < OMAP3_HS_USB_PORTS ; i++) {
+		clk = pdata->transceiver_clk[i];
+		if (clk)
+			clk_disable(clk);
+	}
+
+	omap_pm_set_min_bus_tput(dev,
+			OCP_INITIATOR_AGENT,
+			-1);
+
+	return ret;
+}
+
+static int ehci_omap_bus_resume(struct usb_hcd *hcd)
+{
+	struct device *dev = hcd->self.controller;
+	struct ehci_hcd_omap_platform_data  *pdata;
+	struct clk *clk;
+	int i;
+
+	dev_dbg(dev, "ehci_omap_bus_resume\n");
+
+	/* Re-enable any external transceiver clocks first */
+	pdata = dev->platform_data;
+	for (i = 0 ; i < OMAP3_HS_USB_PORTS ; i++) {
+		clk = pdata->transceiver_clk[i];
+		if (clk)
+			clk_enable(clk);
+	}
+
+	omap_pm_set_min_bus_tput(dev,
+			OCP_INITIATOR_AGENT,
+			(200*1000*4));
+
+	if (dev->parent) {
+		pm_runtime_get_sync(dev->parent);
+	}
+
+	return ehci_bus_resume(hcd);
 }
 
 static struct platform_driver ehci_hcd_omap_driver = {
 	.probe			= ehci_hcd_omap_probe,
 	.remove			= ehci_hcd_omap_remove,
 	.shutdown		= ehci_hcd_omap_shutdown,
-	/*.suspend		= ehci_hcd_omap_suspend, */
-	/*.resume		= ehci_hcd_omap_resume, */
 	.driver = {
 		.name		= "ehci-omap",
 	}
@@ -315,8 +470,8 @@ static const struct hc_driver ehci_omap_hc_driver = {
 	 */
 	.hub_status_data	= ehci_hub_status_data,
 	.hub_control		= ehci_hub_control,
-	.bus_suspend		= ehci_bus_suspend,
-	.bus_resume		= ehci_bus_resume,
+	.bus_suspend		= ehci_omap_bus_suspend,
+	.bus_resume		= ehci_omap_bus_resume,
 
 	.clear_tt_buffer_complete = ehci_clear_tt_buffer_complete,
 };

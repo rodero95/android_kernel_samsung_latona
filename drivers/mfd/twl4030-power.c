@@ -30,6 +30,9 @@
 #include <linux/platform_device.h>
 
 #include <asm/mach-types.h>
+#include <linux/reboot.h>
+
+#include <../../mach-omap2/smartreflex.h>
 
 static u8 twl4030_start_script_address = 0x2b;
 
@@ -62,6 +65,11 @@ static u8 twl4030_start_script_address = 0x2b;
 #define	R_SEQ_ADD_WARM		PHY_TO_OFF_PM_MASTER(0x58)
 #define R_MEMORY_ADDRESS	PHY_TO_OFF_PM_MASTER(0x59)
 #define R_MEMORY_DATA		PHY_TO_OFF_PM_MASTER(0x5a)
+
+/* Smartreflex Control */
+#define R_DCDC_GLOBAL_CFG	PHY_TO_OFF_PM_RECEIVER(0x61)
+#define CFG_ENABLE_SRFLX	0x08
+
 
 /* resource configuration registers
    <RESOURCE>_DEV_GRP   at address 'n+0'
@@ -121,6 +129,30 @@ static u8 res_config_addrs[] = {
 	[RES_32KCLKOUT]	= 0x8e,
 	[RES_RESET]	= 0x91,
 	[RES_MAIN_REF]	= 0x94,
+};
+
+/*
+ * PRCM on OMAP3 will drive SYS_OFFMODE low during DPLL3 warm reset.
+ * This causes Gaia sleep script to execute, usually killing VDD1 and
+ * VDD2 while code is running.  WA is to disable the sleep script
+ * before warm reset.
+ */
+static int twl4030_prepare_for_reboot(struct notifier_block *this,
+		unsigned long cmd, void *p)
+{
+	int err;
+
+	err = twl4030_remove_script(TWL4030_SLEEP_SCRIPT);
+	if (err)
+		pr_err("TWL4030: error trying to disable sleep script!\n");
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block twl4030_reboot_notifier = {
+		.notifier_call = twl4030_prepare_for_reboot,
+		.next = NULL,
+		.priority = 0
 };
 
 static int __init twl4030_write_script_byte(u8 address, u8 byte)
@@ -511,12 +543,35 @@ int twl4030_remove_script(u8 flags)
 	return err;
 }
 
+/* API to enable smrtreflex on Triton side */
+static void twl4030_smartreflex_init(void)
+{
+	int ret = 0;
+	u8 read_val;
+
+	ret = twl_i2c_read_u8(TWL4030_MODULE_PM_RECEIVER, &read_val,
+			R_DCDC_GLOBAL_CFG);
+	read_val |= CFG_ENABLE_SRFLX;
+	ret |= twl_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, read_val,
+			R_DCDC_GLOBAL_CFG);
+}
+
+struct omap_sr_pmic_data twl4030_sr_data = {
+	.sr_pmic_init   = twl4030_smartreflex_init,
+};
+void __init twl4030_power_sr_init()
+{
+	/* Register the SR init API with the Smartreflex driver */
+	omap_sr_register_pmic(&twl4030_sr_data);
+}
+
 void __init twl4030_power_init(struct twl4030_power_data *twl4030_scripts)
 {
 	int err = 0;
 	int i;
 	struct twl4030_resconfig *resconfig;
 	u8 address = twl4030_start_script_address;
+	u8 reg_val = 0;
 
 	err = twl_i2c_write_u8(TWL4030_MODULE_PM_MASTER,
 			TWL4030_PM_MASTER_KEY_CFG1,
@@ -548,10 +603,46 @@ void __init twl4030_power_init(struct twl4030_power_data *twl4030_scripts)
 		}
 	}
 
+	// Change VIO_1.8v from 1.8v to 1.85v [+]
+	err = twl_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, 0x01, 0x54);
+	if(err) {
+		pr_err("TWL4030 failed to write VIO_VSEL register!.\n");
+	} else {
+		twl_i2c_read_u8(TWL4030_MODULE_PM_RECEIVER, &reg_val, 0x54);
+		pr_err("TWL4030 success to write VIO_VSEL register(= 0x%02x)!.\n", reg_val);
+	}
+	// Change VIO_1.8v from 1.8v to 1.85v [-]
+
+	// Clear STARTON_RTC bit in CFG_Px_TRANSITION register [+]
+	err = twl_i2c_write_u8(TWL4030_MODULE_PM_MASTER, 0xe7, R_CFG_P1_TRANSITION);
+	if(err) {
+		pr_err("TWL4030 failed to write CFG_P1_TRANSITION register!.\n");
+		goto resource;
+	}
+
+	err = twl_i2c_write_u8(TWL4030_MODULE_PM_MASTER, 0xe7, R_CFG_P2_TRANSITION);
+	if(err) {
+		pr_err("TWL4030 failed to write CFG_P2_TRANSITION register!.\n");
+		goto resource;
+	}
+
+	err = twl_i2c_write_u8(TWL4030_MODULE_PM_MASTER, 0xe7, R_CFG_P3_TRANSITION);
+	if(err) {
+		pr_err("TWL4030 failed to write CFG_P3_TRANSITION register!.\n");
+		goto resource;
+	}
+    
+	// Clear STARTON_RTC bit in CFG_Px_TRANSITION register [-]
+
 	err = twl_i2c_write_u8(TWL4030_MODULE_PM_MASTER, 0,
 			TWL4030_PM_MASTER_PROTECT_KEY);
 	if (err)
 		pr_err("TWL4030 Unable to relock registers\n");
+
+	err = register_reboot_notifier(&twl4030_reboot_notifier);
+	if (err)
+		pr_err("TWL4030 Failed to register reboot notifier\n");
+
 	return;
 
 unlock:

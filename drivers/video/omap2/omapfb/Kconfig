@@ -7,6 +7,7 @@ menuconfig FB_OMAP2
         select FB_CFB_FILLRECT
         select FB_CFB_COPYAREA
         select FB_CFB_IMAGEBLIT
+        select FB_MODE_HELPERS
         help
 	  Frame buffer driver for OMAP2+ based boards.
 
@@ -26,3 +27,18 @@ config FB_OMAP2_NUM_FBS
 	help
 	  Select the number of framebuffers created. OMAP2/3 has 3 overlays
 	  so normally this would be 3.
+
+config FB_OMAP2_VSYNC_SYSFS
+	depends on FB_OMAP2
+	bool "Use sysfs_notify for vsync notification"
+	default y
+	---help---
+	  Saying 'Y' here will use sysfs_notify instead of the default uevent for
+	  notification of vsync events to userspace
+
+config FB_OMAP2_PROGRESS_BAR
+	depends on FB_OMAP2
+	bool "Use sysfs_notify for vsync notification"
+	default n
+	---help---
+	  Saying 'Y' if you want to show a progress-bar while the kernel is loading.

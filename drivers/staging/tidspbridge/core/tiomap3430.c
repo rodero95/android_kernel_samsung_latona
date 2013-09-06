@@ -583,6 +583,10 @@ static int bridge_brd_start(struct bridge_dev_context *dev_ctxt,
 		(*pdata->dsp_cm_write)(OMAP34XX_CLKSTCTRL_ENABLE_AUTO,
 					OMAP3430_IVA2_MOD, OMAP2_CM_CLKSTCTRL);
 
+		/* Start wdt */
+		dsp_wdt_sm_set((void *)ul_shm_base);
+		dsp_wdt_enable(true);
+
 		/* Let DSP go */
 		dev_dbg(bridge, "%s Unreset\n", __func__);
 		/* Enable DSP MMU Interrupts */
@@ -603,9 +607,8 @@ static int bridge_brd_start(struct bridge_dev_context *dev_ctxt,
 		if (!wait_for_start(dev_context, dw_sync_addr))
 			status = -ETIMEDOUT;
 
-		/* Start wdt */
+		/* write the wdt again */
 		dsp_wdt_sm_set((void *)ul_shm_base);
-		dsp_wdt_enable(true);
 
 		status = dev_get_io_mgr(dev_context->dev_obj, &hio_mgr);
 		if (hio_mgr) {
@@ -655,6 +658,7 @@ static int bridge_brd_stop(struct bridge_dev_context *dev_ctxt)
 					OMAP3430_IVA2_MOD, OMAP2_RM_RSTCTRL);
 		sm_interrupt_dsp(dev_context, MBX_PM_DSPIDLE);
 		mdelay(10);
+		dsp_clk_disable(DSP_CLK_IVA2);
 
 		/* IVA2 is not in OFF state */
 		/* Set PM_PWSTCTRL_IVA2  to OFF */
@@ -663,7 +667,9 @@ static int bridge_brd_stop(struct bridge_dev_context *dev_ctxt)
 		/* Set the SW supervised state transition for Sleep */
 		(*pdata->dsp_cm_write)(OMAP34XX_CLKSTCTRL_FORCE_SLEEP,
 					OMAP3430_IVA2_MOD, OMAP2_CM_CLKSTCTRL);
-	}
+	} else
+		dsp_clk_disable(DSP_CLK_IVA2);
+
 	udelay(10);
 	/* Release the Ext Base virtual Address as the next DSP Program
 	 * may have a different load address */
@@ -693,7 +699,6 @@ static int bridge_brd_stop(struct bridge_dev_context *dev_ctxt)
 			OMAP3430_RST3_IVA2_MASK, OMAP3430_IVA2_MOD, OMAP2_RM_RSTCTRL);
 
 	dsp_clock_disable_all(dev_context->dsp_per_clks);
-	dsp_clk_disable(DSP_CLK_IVA2);
 
 	return status;
 }
@@ -1046,8 +1051,6 @@ static int bridge_dev_destroy(struct bridge_dev_context *dev_ctxt)
 
 	/* Free the driver's device context: */
 	kfree(drv_datap->base_img);
-	kfree(drv_datap);
-	dev_set_drvdata(bridge, NULL);
 	kfree((void *)dev_ctxt);
 	return status;
 }

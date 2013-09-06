@@ -14,12 +14,70 @@
 #include <linux/gpio.h>
 #include <linux/i2c/twl.h>
 #include <linux/spi/spi.h>
+#include <linux/regulator/machine.h>
+#include <linux/regulator/consumer.h>
 #include <plat/mcspi.h>
 #include <video/omapdss.h>
+#include <plat/omap-pm.h>
+#include "mux.h"
+#ifdef CONFIG_PANEL_SIL9022
+#include <mach/sil9022.h>
+#endif
 
 #define LCD_PANEL_RESET_GPIO_PROD	96
 #define LCD_PANEL_RESET_GPIO_PILOT	55
 #define LCD_PANEL_QVGA_GPIO		56
+#define TV_PANEL_ENABLE_GPIO		95
+#define SIL9022_RESET_GPIO		97
+
+#ifdef CONFIG_PANEL_SIL9022
+void config_hdmi_gpio(void)
+{
+	/* HDMI_RESET uses CAM_PCLK mode 4*/
+	omap_mux_init_signal("gpio_97", OMAP_PIN_INPUT_PULLUP);
+}
+
+void zoom_hdmi_reset_enable(int level)
+{
+	/* Set GPIO_97 to high to pull SiI9022 HDMI transmitter out of reset
+	* and low to disable it.
+	*/
+	gpio_request(SIL9022_RESET_GPIO, "hdmi reset");
+	gpio_direction_output(SIL9022_RESET_GPIO, level);
+}
+
+static int zoom_panel_enable_hdmi(struct omap_dss_device *dssdev)
+{
+	zoom_hdmi_reset_enable(1);
+	return 0;
+}
+
+static void zoom_panel_disable_hdmi(struct omap_dss_device *dssdev)
+{
+	zoom_hdmi_reset_enable(0);
+}
+
+struct hdmi_platform_data zoom_hdmi_data = {
+
+};
+
+static struct omap_dss_device zoom_hdmi_device = {
+	.name = "hdmi",
+	.driver_name = "hdmi_panel",
+	.type = OMAP_DISPLAY_TYPE_DPI,
+	.clocks	= {
+		.dispc	= {
+			.dispc_fclk_src	= OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DISPC,
+		},
+	},
+	.phy.dpi.data_lines = 24,
+	.platform_enable = zoom_panel_enable_hdmi,
+	.platform_disable = zoom_panel_disable_hdmi,
+	.dev		= {
+		.platform_data = &zoom_hdmi_data,
+	},
+};
+#endif
 
 static struct gpio zoom_lcd_gpios[] __initdata = {
 	{ -EINVAL,		GPIOF_OUT_INIT_HIGH, "lcd reset" },
@@ -34,6 +92,21 @@ static void __init zoom_lcd_panel_init(void)
 
 	if (gpio_request_array(zoom_lcd_gpios, ARRAY_SIZE(zoom_lcd_gpios)))
 		pr_err("%s: Failed to get LCD GPIOs.\n", __func__);
+}
+
+static void __init zoom_tv_panel_init(void)
+{
+	int ret;
+
+	ret = gpio_request(TV_PANEL_ENABLE_GPIO, "tv panel");
+	if (ret) {
+		pr_err("Failed to get TV_PANEL_ENABLE_GPIO.\n");
+		goto err1;
+	}
+	gpio_direction_output(TV_PANEL_ENABLE_GPIO, 0);
+
+err1:
+	return;
 }
 
 static int zoom_panel_enable_lcd(struct omap_dss_device *dssdev)
@@ -94,10 +167,46 @@ static int zoom_set_bl_intensity(struct omap_dss_device *dssdev, int level)
 	return 0;
 }
 
+static int zoom_panel_enable_tv(struct omap_dss_device *dssdev)
+{
+	int ret;
+	struct regulator *vdac_reg;
+
+	vdac_reg = regulator_get(NULL, "vdda_dac");
+	if (IS_ERR(vdac_reg)) {
+		pr_err("Unable to get vdac regulator\n");
+		return PTR_ERR(vdac_reg);
+	}
+	ret = regulator_enable(vdac_reg);
+	if (ret < 0)
+		return ret;
+	gpio_set_value(TV_PANEL_ENABLE_GPIO, 0);
+
+	return 0;
+}
+
+static void zoom_panel_disable_tv(struct omap_dss_device *dssdev)
+{
+	struct regulator *vdac_reg;
+
+	vdac_reg = regulator_get(NULL, "vdda_dac");
+	if (IS_ERR(vdac_reg)) {
+		pr_err("Unable to get vpll2 regulator\n");
+		return;
+	}
+	regulator_disable(vdac_reg);
+	gpio_set_value(TV_PANEL_ENABLE_GPIO, 1);
+}
+
 static struct omap_dss_device zoom_lcd_device = {
 	.name			= "lcd",
 	.driver_name		= "NEC_8048_panel",
 	.type			= OMAP_DISPLAY_TYPE_DPI,
+	.clocks = {
+		.dispc  = {
+			.dispc_fclk_src = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DISPC,
+		},
+	},
 	.phy.dpi.data_lines	= 24,
 	.platform_enable	= zoom_panel_enable_lcd,
 	.platform_disable	= zoom_panel_disable_lcd,
@@ -105,8 +214,21 @@ static struct omap_dss_device zoom_lcd_device = {
 	.set_backlight		= zoom_set_bl_intensity,
 };
 
+static struct omap_dss_device zoom_tv_device = {
+	.name                   = "tv",
+	.driver_name            = "venc",
+	.type                   = OMAP_DISPLAY_TYPE_VENC,
+	.phy.venc.type          = OMAP_DSS_VENC_TYPE_COMPOSITE,
+	.platform_enable        = zoom_panel_enable_tv,
+	.platform_disable       = zoom_panel_disable_tv,
+};
+
 static struct omap_dss_device *zoom_dss_devices[] = {
 	&zoom_lcd_device,
+	#ifdef CONFIG_PANEL_SIL9022
+		&zoom_hdmi_device,
+	#endif
+	&zoom_tv_device
 };
 
 static struct omap_dss_board_info zoom_dss_data = {
@@ -136,5 +258,6 @@ void __init zoom_display_init(void)
 	spi_register_board_info(nec_8048_spi_board_info,
 				ARRAY_SIZE(nec_8048_spi_board_info));
 	zoom_lcd_panel_init();
+	zoom_tv_panel_init();
 }
 

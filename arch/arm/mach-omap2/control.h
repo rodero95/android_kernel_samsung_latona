@@ -183,6 +183,7 @@
 #define OMAP3630_CONTROL_FUSE_OPP120_VDD1       (OMAP2_CONTROL_GENERAL + 0x0120)
 #define OMAP3630_CONTROL_FUSE_OPP50_VDD2        (OMAP2_CONTROL_GENERAL + 0x0128)
 #define OMAP3630_CONTROL_FUSE_OPP100_VDD2       (OMAP2_CONTROL_GENERAL + 0x012C)
+#define OMAP36XX_CONTROL_PROG_IO2               (OMAP2_CONTROL_GENERAL + 0x0198)
 
 /* OMAP44xx control efuse offsets */
 #define OMAP44XX_CONTROL_FUSE_IVA_OPP50		0x22C
@@ -193,8 +194,10 @@
 #define OMAP44XX_CONTROL_FUSE_MPU_OPP100	0x243
 #define OMAP44XX_CONTROL_FUSE_MPU_OPPTURBO	0x246
 #define OMAP44XX_CONTROL_FUSE_MPU_OPPNITRO	0x249
+#define OMAP44XX_CONTROL_FUSE_MPU_OPPNITROSB	0x24C
 #define OMAP44XX_CONTROL_FUSE_CORE_OPP50	0x254
 #define OMAP44XX_CONTROL_FUSE_CORE_OPP100	0x257
+#define OMAP44XX_CONTROL_FUSE_CORE_OPP100OV	0x25A
 
 /* AM35XX only CONTROL_GENERAL register offsets */
 #define AM35XX_CONTROL_MSUSPENDMUX_6    (OMAP2_CONTROL_GENERAL + 0x0038)
@@ -236,6 +239,11 @@
 #define OMAP343X_CONTROL_WKUP_DEBOBS3 (OMAP343X_CONTROL_GENERAL_WKUP + 0x014)
 #define OMAP343X_CONTROL_WKUP_DEBOBS4 (OMAP343X_CONTROL_GENERAL_WKUP + 0x018)
 
+
+/* 36xx-only GENERAL_WKUP register offsets */
+#define OMAP36XX_CONTROL_PROG_IO_WKUP1 (OMAP343X_CONTROL_GENERAL_WKUP + 0x020)
+#define OMAP36XX_CONTROL_VBBLDO_EFUSE_CTRL (OMAP343X_CONTROL_GENERAL_WKUP + 0X02C)
+
 /* 36xx-only RTA - Retention till Access control registers and bits */
 #define OMAP36XX_CONTROL_MEM_RTA_CTRL	0x40C
 #define OMAP36XX_RTA_DISABLE		0x0
@@ -246,6 +254,9 @@
 
 /* TI816X CONTROL_DEVCONF register offsets */
 #define TI816X_CONTROL_DEVICE_ID	(TI816X_CONTROL_DEVCONF + 0x000)
+
+#define OMAP36XX_CONTROL_WKUP_CTRL	(0x0A5C)
+#define OMAP36XX_GPIO_IO_PWRDNZ		(1<<6)
 
 /*
  * REVISIT: This list of registers is not comprehensive - there are more
@@ -294,8 +305,18 @@
 #define OMAP2_PBIASLITEPWRDNZ0		(1 << 1)
 #define OMAP2_PBIASLITEVMODE0		(1 << 0)
 
+/* CONTROL_PROG_IO1 bits on omap3630 */
+#define OMAP3630_PRG_I2C2_PULLUPRESX    (1 << 0)
+#define OMAP3630_PRG_I2C1_PULLUPRESX	(1 << 19)
+
 /* CONTROL_PROG_IO1 bits */
 #define OMAP3630_PRG_SDMMC1_SPEEDCTRL	(1 << 20)
+
+/* CONTROL_PROG_IO2 bits on omap3630 */
+#define OMAP3630_PRG_I2C3_PULLUPRESX    (1 << 7)
+
+/* CONTROL_PROG_IO_WKUP1 bits on omap3630 */
+#define OMAP3630_PRG_SR_PULLUPRESX      (1 << 5)
 
 /* CONTROL_IVA2_BOOTMOD bits */
 #define OMAP3_IVA2_BOOTMOD_SHIFT	0
@@ -378,11 +399,21 @@ extern void __iomem *omap_ctrl_base_get(void);
 extern u8 omap_ctrl_readb(u16 offset);
 extern u16 omap_ctrl_readw(u16 offset);
 extern u32 omap_ctrl_readl(u16 offset);
+extern u8 omap4_ctrl_pad_readb(u16 offset);
+extern u16 omap4_ctrl_pad_readw(u16 offset);
 extern u32 omap4_ctrl_pad_readl(u16 offset);
+extern u8 omap4_ctrl_wk_pad_readb(u16 offset);
+extern u16 omap4_ctrl_wk_pad_readw(u16 offset);
+extern u32 omap4_ctrl_wk_pad_readl(u16 offset);
 extern void omap_ctrl_writeb(u8 val, u16 offset);
 extern void omap_ctrl_writew(u16 val, u16 offset);
 extern void omap_ctrl_writel(u32 val, u16 offset);
+extern void omap4_ctrl_pad_writeb(u8 val, u16 offset);
+extern void omap4_ctrl_pad_writew(u16 val, u16 offset);
 extern void omap4_ctrl_pad_writel(u32 val, u16 offset);
+extern void omap4_ctrl_wk_pad_writeb(u8 val, u16 offset);
+extern void omap4_ctrl_wk_pad_writew(u16 val, u16 offset);
+extern void omap4_ctrl_wk_pad_writel(u32 val, u16 offset);
 
 extern void omap3_save_scratchpad_contents(void);
 extern void omap3_clear_scratchpad_contents(void);
@@ -400,11 +431,21 @@ extern int omap3_ctrl_save_padconf(void);
 #define omap_ctrl_readb(x)		0
 #define omap_ctrl_readw(x)		0
 #define omap_ctrl_readl(x)		0
-#define omap4_ctrl_pad_readl(x)		0
+#define omap4_ctrl_pad_readb(x)         0
+#define omap4_ctrl_pad_readw(x)         0
+#define omap4_ctrl_pad_readl(x)         0
+#define omap4_ctrl_wk_pad_readb(x)	0
+#define omap4_ctrl_wk_pad_readw(x)	0
+#define omap4_ctrl_wk_pad_readl(x)	0
 #define omap_ctrl_writeb(x, y)		WARN_ON(1)
 #define omap_ctrl_writew(x, y)		WARN_ON(1)
 #define omap_ctrl_writel(x, y)		WARN_ON(1)
+#define omap4_ctrl_pad_writeb(x, y)     WARN_ON(1)
+#define omap4_ctrl_pad_writew(x, y)     WARN_ON(1)
 #define omap4_ctrl_pad_writel(x, y)	WARN_ON(1)
+#define omap4_ctrl_wk_pad_writeb(x, y)     WARN_ON(1)
+#define omap4_ctrl_wk_pad_writew(x, y)     WARN_ON(1)
+#define omap4_ctrl_wk_pad_writel(x, y)     WARN_ON(1)
 #endif
 #endif	/* __ASSEMBLY__ */
 

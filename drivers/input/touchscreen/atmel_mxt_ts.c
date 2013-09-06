@@ -20,6 +20,15 @@
 #include <linux/input/mt.h>
 #include <linux/interrupt.h>
 #include <linux/slab.h>
+#ifdef CONFIG_LEDS_LATONA
+#include <linux/leds.h>
+#endif
+#include <mach/gpio.h>
+#if defined(CONFIG_HAS_EARLYSUSPEND)
+#include <linux/earlysuspend.h>
+/* Early-suspend level */
+#define MXT_SUSPEND_LEVEL 1
+#endif
 
 /* Version */
 #define MXT_VER_20		20
@@ -78,9 +87,13 @@
 #define MXT_COMMAND_DIAGNOSTIC	5
 
 /* MXT_GEN_POWER field */
-#define MXT_POWER_IDLEACQINT	0
-#define MXT_POWER_ACTVACQINT	1
-#define MXT_POWER_ACTV2IDLETO	2
+struct t7_config {
+	u8 idle;
+	u8 active;
+} __packed;
+
+#define MXT_POWER_CFG_RUN	0
+#define MXT_POWER_CFG_DEEPSLEEP	1
 
 /* MXT_GEN_ACQUIRE field */
 #define MXT_ACQUIRE_CHRGTIME	0
@@ -171,8 +184,10 @@
 #define MXT_BACKUP_VALUE	0x55
 #define MXT_BACKUP_TIME		25	/* msec */
 #define MXT_RESET_TIME		65	/* msec */
+#define MXT_ENABLE_TIME		80	/* msec */
 
 #define MXT_FWRESET_TIME	175	/* msec */
+#define MXT_WAKEUP_TIME		25	/* msec */
 
 /* Command to unlock bootloader */
 #define MXT_UNLOCK_CMD_MSB	0xaa
@@ -251,6 +266,12 @@ struct mxt_data {
 	unsigned int irq;
 	unsigned int max_x;
 	unsigned int max_y;
+	u32 keyarray_old;
+	u32 keyarray_new;
+	struct t7_config t7_cfg;
+#if defined(CONFIG_HAS_EARLYSUSPEND)
+	struct early_suspend early_suspend;
+#endif
 };
 
 static bool mxt_object_readable(unsigned int type)
@@ -381,6 +402,8 @@ static int __mxt_read_reg(struct i2c_client *client,
 {
 	struct i2c_msg xfer[2];
 	u8 buf[2];
+	int ret;
+	bool retry = false;
 
 	buf[0] = reg & 0xff;
 	buf[1] = (reg >> 8) & 0xff;
@@ -397,9 +420,19 @@ static int __mxt_read_reg(struct i2c_client *client,
 	xfer[1].len = len;
 	xfer[1].buf = val;
 
-	if (i2c_transfer(client->adapter, xfer, 2) != 2) {
-		dev_err(&client->dev, "%s: i2c transfer failed\n", __func__);
-		return -EIO;
+retry_read:
+	ret = i2c_transfer(client->adapter, xfer, ARRAY_SIZE(xfer));
+	if (ret != ARRAY_SIZE(xfer)) {
+		if (!retry) {
+			dev_dbg(&client->dev, "%s: i2c retry\n", __func__);
+			msleep(MXT_WAKEUP_TIME);
+			retry = true;
+			goto retry_read;
+		} else {
+			dev_err(&client->dev, "%s: i2c transfer failed (%d)\n",
+				__func__, ret);
+			return -EIO;
+		}
 	}
 
 	return 0;
@@ -410,20 +443,47 @@ static int mxt_read_reg(struct i2c_client *client, u16 reg, u8 *val)
 	return __mxt_read_reg(client, reg, 1, val);
 }
 
-static int mxt_write_reg(struct i2c_client *client, u16 reg, u8 val)
+static int __mxt_write_reg(struct i2c_client *client, u16 reg, u16 len,
+			   const void *val)
 {
-	u8 buf[3];
+	u8 *buf;
+	size_t count;
+	int ret;
+	bool retry = false;
+
+	count = len + 2;
+	buf = kmalloc(count, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
 
 	buf[0] = reg & 0xff;
 	buf[1] = (reg >> 8) & 0xff;
-	buf[2] = val;
+	memcpy(&buf[2], val, len);
 
-	if (i2c_master_send(client, buf, 3) != 3) {
-		dev_err(&client->dev, "%s: i2c send failed\n", __func__);
-		return -EIO;
+retry_write:
+	ret = i2c_master_send(client, buf, count);
+	if (ret == count) {
+		ret = 0;
+	} else {
+		if (!retry) {
+			dev_dbg(&client->dev, "%s: i2c retry\n", __func__);
+			msleep(MXT_WAKEUP_TIME);
+			retry = true;
+			goto retry_write;
+		} else {
+			dev_err(&client->dev, "%s: i2c send failed (%d)\n",
+				__func__, ret);
+			ret = -EIO;
+		}
 	}
 
-	return 0;
+	kfree(buf);
+	return ret;
+}
+
+static int mxt_write_reg(struct i2c_client *client, u16 reg, u8 val)
+{
+	return __mxt_write_reg(client, reg, 1, &val);
 }
 
 static int mxt_read_object_table(struct i2c_client *client,
@@ -578,6 +638,56 @@ static void mxt_input_touchevent(struct mxt_data *data,
 	mxt_input_report(data, id);
 }
 
+static void mxt_handle_key_array(struct mxt_data *data,
+				struct mxt_message *message)
+{
+	u32 keys_changed;
+	int i;
+
+	if (!data->pdata->key_codes) {
+		dev_err(&data->client->dev, "keyarray is not supported\n");
+		return;
+	}
+
+	data->keyarray_new = message->message[1] |
+				(message->message[2] << 8) |
+				(message->message[3] << 16) |
+				(message->message[4] << 24);
+
+	keys_changed = data->keyarray_old ^ data->keyarray_new;
+
+	if (!keys_changed) {
+		dev_dbg(&data->client->dev, "no keys changed\n");
+		return;
+	}
+
+	for (i = 0; i < MXT_KEYARRAY_MAX_KEYS; i++) {
+		if (!(keys_changed & (1 << i)))
+			continue;
+
+		input_report_key(data->input_dev, data->pdata->key_codes[i],
+					(data->keyarray_new & (1 << i)));
+		input_sync(data->input_dev);
+#ifdef CONFIG_LEDS_LATONA
+		latona_leds_report_event(data->pdata->key_codes[i], 
+					(data->keyarray_new & (1 << i)));
+#endif
+	}
+
+	data->keyarray_old = data->keyarray_new;
+}
+
+static void mxt_release_all(struct mxt_data *data)
+{
+	int id;
+
+	for (id = 0; id < MXT_MAX_FINGER; id++)
+		if (data->finger[id].status)
+			data->finger[id].status = MXT_RELEASE;
+
+	mxt_input_report(data, 0);
+}
+
 static irqreturn_t mxt_interrupt(int irq, void *dev_id)
 {
 	struct mxt_data *data = dev_id;
@@ -596,6 +706,18 @@ static irqreturn_t mxt_interrupt(int irq, void *dev_id)
 		}
 
 		reportid = message.reportid;
+
+		/* whether reportid is thing of MXT_TOUCH_KEYARRAY */
+		object = mxt_get_object(data, MXT_TOUCH_KEYARRAY);
+		if (!object)
+			goto end;
+
+		max_reportid = object->max_reportid;
+		min_reportid = max_reportid - object->num_report_ids + 1;
+		id = reportid - min_reportid;
+
+		if (reportid >= min_reportid && reportid <= max_reportid)
+			mxt_handle_key_array(data, &message);
 
 		/* whether reportid is thing of MXT_TOUCH_MULTI */
 		object = mxt_get_object(data, MXT_TOUCH_MULTI);
@@ -648,6 +770,66 @@ static int mxt_check_reg_init(struct mxt_data *data)
 	}
 
 	return 0;
+}
+
+static int mxt_set_t7_power_cfg(struct mxt_data *data, u8 sleep)
+{
+	struct device *dev = &data->client->dev;
+	int error;
+	struct t7_config *new_config;
+	struct t7_config deepsleep = { .active = 0, .idle = 0 };
+
+	if (sleep == MXT_POWER_CFG_DEEPSLEEP)
+		new_config = &deepsleep;
+	else
+		new_config = &data->t7_cfg;
+
+	error = __mxt_write_reg(data->client, MXT_GEN_POWER,
+			sizeof(data->t7_cfg),
+			new_config);
+	if (error)
+		return error;
+
+	dev_dbg(dev, "Set T7 ACTV:%d IDLE:%d\n",
+		new_config->active, new_config->idle);
+
+	return 0;
+}
+
+static int mxt_init_t7_power_cfg(struct mxt_data *data)
+{
+	struct device *dev = &data->client->dev;
+	int error;
+	bool retry = false;
+
+recheck:
+	error = __mxt_read_reg(data->client, MXT_GEN_POWER,
+				sizeof(data->t7_cfg), &data->t7_cfg);
+	if (error)
+		return error;
+
+	if (data->t7_cfg.active == 0 || data->t7_cfg.idle == 0) {
+		if (!retry) {
+			dev_info(dev, "T7 cfg zero, resetting\n");
+			/* Soft reset */
+			error = mxt_write_object(data, MXT_GEN_COMMAND,
+					MXT_COMMAND_RESET, 1);
+			if (error)
+				return error;
+
+			retry = true;
+			goto recheck;
+		} else {
+		    dev_dbg(dev, "T7 cfg zero after reset, overriding\n");
+		    data->t7_cfg.active = 20;
+		    data->t7_cfg.idle = 100;
+		    return mxt_set_t7_power_cfg(data, MXT_POWER_CFG_RUN);
+		}
+	} else {
+		dev_info(dev, "Initialised power cfg: ACTV %d, IDLE %d\n",
+				data->t7_cfg.active, data->t7_cfg.idle);
+		return 0;
+	}
 }
 
 static int mxt_make_highchg(struct mxt_data *data)
@@ -828,6 +1010,12 @@ static int mxt_initialize(struct mxt_data *data)
 	mxt_write_object(data, MXT_GEN_COMMAND,
 			MXT_COMMAND_RESET, 1);
 	msleep(MXT_RESET_TIME);
+
+	error = mxt_init_t7_power_cfg(data);
+	if (error) {
+		dev_err(&client->dev, "Failed to initialize power cfg\n");
+		return error;
+	}
 
 	/* Update matrix size at info struct */
 	error = mxt_read_reg(client, MXT_MATRIX_X_SIZE, &val);
@@ -1025,16 +1213,16 @@ static const struct attribute_group mxt_attr_group = {
 
 static void mxt_start(struct mxt_data *data)
 {
-	/* Touch enable */
-	mxt_write_object(data,
-			MXT_TOUCH_MULTI, MXT_TOUCH_CTRL, 0x83);
+	mxt_set_t7_power_cfg(data, MXT_POWER_CFG_RUN);
+
+	/* Recalibrate since chip has been in deep sleep */
+	mxt_write_object(data, MXT_GEN_COMMAND,
+		MXT_COMMAND_CALIBRATE, 1);
 }
 
 static void mxt_stop(struct mxt_data *data)
 {
-	/* Touch disable */
-	mxt_write_object(data,
-			MXT_TOUCH_MULTI, MXT_TOUCH_CTRL, 0);
+	mxt_set_t7_power_cfg(data, MXT_POWER_CFG_DEEPSLEEP);
 }
 
 static int mxt_input_open(struct input_dev *dev)
@@ -1053,13 +1241,89 @@ static void mxt_input_close(struct input_dev *dev)
 	mxt_stop(data);
 }
 
+#ifdef CONFIG_PM
+static int mxt_suspend(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct mxt_data *data = i2c_get_clientdata(client);
+	struct input_dev *input_dev = data->input_dev;
+
+	disable_irq(data->irq);
+	mxt_release_all(data);
+
+	mutex_lock(&input_dev->mutex);
+
+	if (input_dev->users)
+		mxt_stop(data);
+
+	mutex_unlock(&input_dev->mutex);
+
+	gpio_direction_output(data->pdata->tsp_en_gpio, 0);
+
+#ifdef CONFIG_LEDS_LATONA
+	latona_leds_report_event(KEY_POWER, 0);
+#endif
+
+	return 0;
+}
+
+static int mxt_resume(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct mxt_data *data = i2c_get_clientdata(client);
+	struct input_dev *input_dev = data->input_dev;
+
+	gpio_direction_output(data->pdata->tsp_en_gpio, 1);
+	msleep(MXT_ENABLE_TIME);
+
+	enable_irq(data->irq);
+
+	msleep(MXT_RESET_TIME);
+
+	mutex_lock(&input_dev->mutex);
+
+	if (input_dev->users)
+		mxt_start(data);
+
+	mutex_unlock(&input_dev->mutex);
+
+#ifdef CONFIG_LEDS_LATONA
+	latona_leds_report_event(KEY_POWER, 1);
+#endif
+
+	return 0;
+}
+#if defined(CONFIG_HAS_EARLYSUSPEND)
+static void mxt_early_suspend(struct early_suspend *h)
+{
+	struct mxt_data *data = container_of(h, struct mxt_data, early_suspend);
+
+	mxt_suspend(&data->client->dev);
+}
+
+static void mxt_late_resume(struct early_suspend *h)
+{
+	struct mxt_data *data = container_of(h, struct mxt_data, early_suspend);
+
+	mxt_resume(&data->client->dev);
+}
+#endif
+
+static const struct dev_pm_ops mxt_pm_ops = {
+#ifndef CONFIG_HAS_EARLYSUSPEND
+	.suspend	= mxt_suspend,
+	.resume		= mxt_resume,
+#endif
+};
+#endif
+
 static int __devinit mxt_probe(struct i2c_client *client,
 		const struct i2c_device_id *id)
 {
 	const struct mxt_platform_data *pdata = client->dev.platform_data;
 	struct mxt_data *data;
 	struct input_dev *input_dev;
-	int error;
+	int error, i;
 
 	if (!pdata)
 		return -EINVAL;
@@ -1072,7 +1336,7 @@ static int __devinit mxt_probe(struct i2c_client *client,
 		goto err_free_mem;
 	}
 
-	input_dev->name = "Atmel maXTouch Touchscreen";
+	input_dev->name = "atmel_mxt_ts";
 	input_dev->id.bustype = BUS_I2C;
 	input_dev->dev.parent = &client->dev;
 	input_dev->open = mxt_input_open;
@@ -1082,6 +1346,17 @@ static int __devinit mxt_probe(struct i2c_client *client,
 	data->input_dev = input_dev;
 	data->pdata = pdata;
 	data->irq = client->irq;
+
+	/* configure touchscreen enable gpio */
+	error = gpio_request(pdata->tsp_en_gpio, "atmel_en_gpio");
+	if (error) {
+		dev_err(&client->dev, "unable to request gpio [%d]\n",
+					pdata->tsp_en_gpio);
+		goto err_free_mem;
+	} else {
+		gpio_direction_output(pdata->tsp_en_gpio, 1);
+		msleep(MXT_ENABLE_TIME);
+	}
 
 	mxt_calc_resolution(data);
 
@@ -1103,6 +1378,15 @@ static int __devinit mxt_probe(struct i2c_client *client,
 			     0, data->max_x, 0, 0);
 	input_set_abs_params(input_dev, ABS_MT_POSITION_Y,
 			     0, data->max_y, 0, 0);
+
+	/* set key array supported keys */
+	if (pdata->key_codes) {
+		for (i = 0; i < MXT_KEYARRAY_MAX_KEYS; i++) {
+			if (pdata->key_codes[i])
+				input_set_capability(input_dev, EV_KEY,
+							pdata->key_codes[i]);
+		}
+	}
 
 	input_set_drvdata(input_dev, data);
 	i2c_set_clientdata(client, data);
@@ -1130,6 +1414,14 @@ static int __devinit mxt_probe(struct i2c_client *client,
 	if (error)
 		goto err_unregister_device;
 
+#if defined(CONFIG_HAS_EARLYSUSPEND)
+	data->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN +
+						MXT_SUSPEND_LEVEL;
+	data->early_suspend.suspend = mxt_early_suspend;
+	data->early_suspend.resume = mxt_late_resume;
+	register_early_suspend(&data->early_suspend);
+#endif
+
 	return 0;
 
 err_unregister_device:
@@ -1151,57 +1443,19 @@ static int __devexit mxt_remove(struct i2c_client *client)
 
 	sysfs_remove_group(&client->dev.kobj, &mxt_attr_group);
 	free_irq(data->irq, data);
+
+	if (gpio_is_valid(data->pdata->tsp_en_gpio))
+		gpio_free(data->pdata->tsp_en_gpio);
+
 	input_unregister_device(data->input_dev);
+#if defined(CONFIG_HAS_EARLYSUSPEND)
+	unregister_early_suspend(&data->early_suspend);
+#endif
 	kfree(data->object_table);
 	kfree(data);
 
 	return 0;
 }
-
-#ifdef CONFIG_PM
-static int mxt_suspend(struct device *dev)
-{
-	struct i2c_client *client = to_i2c_client(dev);
-	struct mxt_data *data = i2c_get_clientdata(client);
-	struct input_dev *input_dev = data->input_dev;
-
-	mutex_lock(&input_dev->mutex);
-
-	if (input_dev->users)
-		mxt_stop(data);
-
-	mutex_unlock(&input_dev->mutex);
-
-	return 0;
-}
-
-static int mxt_resume(struct device *dev)
-{
-	struct i2c_client *client = to_i2c_client(dev);
-	struct mxt_data *data = i2c_get_clientdata(client);
-	struct input_dev *input_dev = data->input_dev;
-
-	/* Soft reset */
-	mxt_write_object(data, MXT_GEN_COMMAND,
-			MXT_COMMAND_RESET, 1);
-
-	msleep(MXT_RESET_TIME);
-
-	mutex_lock(&input_dev->mutex);
-
-	if (input_dev->users)
-		mxt_start(data);
-
-	mutex_unlock(&input_dev->mutex);
-
-	return 0;
-}
-
-static const struct dev_pm_ops mxt_pm_ops = {
-	.suspend	= mxt_suspend,
-	.resume		= mxt_resume,
-};
-#endif
 
 static const struct i2c_device_id mxt_id[] = {
 	{ "qt602240_ts", 0 },

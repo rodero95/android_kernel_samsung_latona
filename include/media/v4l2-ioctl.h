@@ -122,6 +122,13 @@ struct v4l2_ioctl_ops {
 	int (*vidioc_qbuf)    (struct file *file, void *fh, struct v4l2_buffer *b);
 	int (*vidioc_dqbuf)   (struct file *file, void *fh, struct v4l2_buffer *b);
 
+	int (*vidioc_s_strobe)         (struct file *file, void *fh,
+                                        struct v4l2_strobe *a);
+	int (*vidioc_g_strobe)   (struct file *file, void *fh,
+                                        struct v4l2_strobe *a);
+
+	int (*vidioc_g_exif)     (struct file *file, void *fh,
+                                        struct v4l2_exif *a);
 
 	int (*vidioc_overlay) (struct file *file, void *fh, unsigned int i);
 	int (*vidioc_g_fbuf)   (struct file *file, void *fh,
@@ -262,7 +269,8 @@ struct v4l2_ioctl_ops {
 				    struct v4l2_dv_timings *timings);
 	int (*vidioc_g_dv_timings) (struct file *file, void *fh,
 				    struct v4l2_dv_timings *timings);
-
+	int (*vidioc_dqevent) (struct v4l2_fh *fh,
+					struct v4l2_event *ev);
 	int (*vidioc_subscribe_event)  (struct v4l2_fh *fh,
 					struct v4l2_event_subscription *sub);
 	int (*vidioc_unsubscribe_event)(struct v4l2_fh *fh,

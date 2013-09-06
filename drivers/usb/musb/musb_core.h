@@ -47,6 +47,7 @@
 #include <linux/usb.h>
 #include <linux/usb/otg.h>
 #include <linux/usb/musb.h>
+#include <linux/wakelock.h>
 
 struct musb;
 struct musb_hw_ep;
@@ -115,6 +116,32 @@ struct musb_ep;
 #ifdef CONFIG_PROC_FS
 #include <linux/fs.h>
 #define MUSB_CONFIG_PROC_FS
+#endif
+
+extern void musb_hz_mode_work(struct work_struct *);
+
+/* for high speed test mode; see USB 2.0 spec 7.1.20 */
+static const u8 musb_test_packet[53] = {
+	/* implicit SYNC then DATA0 to start */
+
+	/* JKJKJKJK x9 */
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	/* JJKKJJKK x8 */
+	0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa,
+	/* JJJJKKKK x8 */
+	0xee, 0xee, 0xee, 0xee, 0xee, 0xee, 0xee, 0xee,
+	/* JJJJJJJKKKKKKK x8 */
+	0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	/* JJJJJJJK x8 */
+	0x7f, 0xbf, 0xdf, 0xef, 0xf7, 0xfb, 0xfd,
+	/* JKKKKKKK x10, JK */
+	0xfc, 0x7e, 0xbf, 0xdf, 0xef, 0xf7, 0xfb, 0xfd, 0x7e
+
+	/* implicit CRC16 then EOP to end */
+};
+
+#ifdef CONFIG_USB_MUSB_HSET
+extern void musb_init_hset(char *name, struct musb *musb);
 #endif
 
 /****************************** PERIPHERAL ROLE *****************************/
@@ -363,6 +390,12 @@ struct musb_csr_regs {
 
 struct musb_context_registers {
 
+#if defined(CONFIG_ARCH_OMAP2430) || defined(CONFIG_ARCH_OMAP3) || \
+defined(CONFIG_ARCH_OMAP4)
+	u32 otg_sysconfig, otg_forcestandby;
+	u32 ctl_dev_conf;
+	u32 usbotg_control;
+#endif
 	u8 power;
 	u16 intrtxe, intrrxe;
 	u8 intrusbe;
@@ -370,9 +403,20 @@ struct musb_context_registers {
 	u8 index, testmode;
 
 	u8 devctl, busctl, misc;
+	u32 otg_interfsel;
 
 	struct musb_csr_regs index_regs[MUSB_C_NUM_EPS];
 };
+
+#if defined(CONFIG_ARCH_OMAP2430) || defined(CONFIG_ARCH_OMAP3) || \
+defined(CONFIG_ARCH_OMAP4)
+extern void musb_platform_save_context(struct musb *musb);
+extern void musb_platform_restore_context(struct musb *musb);
+
+#else
+#define musb_platform_save_context(m)	do {} while (0)
+#define musb_platform_restore_context(m)	do {} while (0)
+#endif
 
 /*
  * struct musb - Driver instance data.
@@ -385,7 +429,10 @@ struct musb {
 	struct musb_context_registers context;
 
 	irqreturn_t		(*isr)(int, void *);
+	struct wake_lock	musb_wakelock;
 	struct work_struct	irq_work;
+	struct workqueue_struct	*otg_notifier_wq;
+	struct work_struct	hz_mode_work;
 	u16			hwvers;
 
 /* this hub status bit is reserved by USB 2.0 and not seen by usbcore */
@@ -497,6 +544,7 @@ struct musb {
 	struct usb_gadget	g;			/* the gadget */
 	struct usb_gadget_driver *gadget_driver;	/* its driver */
 #endif
+	bool			is_ac_charger:1;
 
 	/*
 	 * FIXME: Remove this flag.
@@ -516,6 +564,12 @@ struct musb {
 #ifdef MUSB_CONFIG_PROC_FS
 	struct proc_dir_entry *proc_entry;
 #endif
+};
+
+struct musb_otg_work {
+	struct work_struct	work;
+	enum usb_xceiv_events	xceiv_event;
+	struct musb		*musb;
 };
 
 #ifdef CONFIG_USB_GADGET_MUSB_HDRC

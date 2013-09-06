@@ -84,32 +84,42 @@ static ssize_t overlay_manager_store(struct omap_overlay *ovl, const char *buf,
 
 	old_mgr = ovl->manager;
 
+	r = dispc_runtime_get();
+	if (r)
+		return r;
+
 	/* detach old manager */
 	if (old_mgr) {
 		r = ovl->unset_manager(ovl);
 		if (r) {
 			DSSERR("detach failed\n");
-			return r;
+			goto err;
 		}
 
 		r = old_mgr->apply(old_mgr);
 		if (r)
-			return r;
+			goto err;
 	}
 
 	if (mgr) {
 		r = ovl->set_manager(ovl, mgr);
 		if (r) {
 			DSSERR("Failed to attach overlay\n");
-			return r;
+			goto err;
 		}
 
 		r = mgr->apply(mgr);
 		if (r)
-			return r;
+			goto err;
 	}
 
+	dispc_runtime_put();
+
 	return size;
+
+err:
+	dispc_runtime_put();
+	return r;
 }
 
 static ssize_t overlay_input_size_show(struct omap_overlay *ovl, char *buf)
@@ -238,6 +248,9 @@ static ssize_t overlay_global_alpha_store(struct omap_overlay *ovl,
 	u8 alpha;
 	struct omap_overlay_info info;
 
+	if (!dss_has_feature(FEAT_GLOBAL_ALPHA))
+		return -ENODEV;
+
 	r = kstrtou8(buf, 0, &alpha);
 	if (r)
 		return r;
@@ -308,6 +321,118 @@ static ssize_t overlay_pre_mult_alpha_store(struct omap_overlay *ovl,
 	return size;
 }
 
+static ssize_t overlay_zorder_show(struct omap_overlay *ovl, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n",
+			ovl->info.zorder);
+}
+
+static ssize_t overlay_zorder_store(struct omap_overlay *ovl,
+		const char *buf, size_t size)
+{
+	int r;
+	struct omap_overlay_info info;
+
+	if (!dss_has_feature(FEAT_OVL_ZORDER))
+		return size;
+
+	ovl->get_overlay_info(ovl, &info);
+
+	info.zorder = simple_strtoul(buf, NULL, 10);
+
+	r = ovl->set_overlay_info(ovl, &info);
+	if (r)
+		return r;
+
+	if (ovl->manager) {
+		r = ovl->manager->apply(ovl->manager);
+		if (r)
+			return r;
+	}
+
+	return size;
+}
+
+static ssize_t overlay_decim_show(u16 min, u16 max, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d..%d\n", min, max);
+}
+
+static ssize_t overlay_x_decim_show(struct omap_overlay *ovl, char *buf)
+{
+	return overlay_decim_show(ovl->info.min_x_decim, ovl->info.max_x_decim,
+									buf);
+}
+
+static ssize_t overlay_y_decim_show(struct omap_overlay *ovl, char *buf)
+{
+	return overlay_decim_show(ovl->info.min_y_decim, ovl->info.max_y_decim,
+									buf);
+}
+
+static ssize_t overlay_decim_store(u16 *min, u16 *max,
+						const char *buf, size_t size)
+{
+	char *last;
+
+	*min = *max = simple_strtoul(buf, &last, 10);
+	if (last < buf + size && *last == '.') {
+		/* check for .. separator */
+		if (last + 2 >= buf + size || last[1] != '.')
+			return -EINVAL;
+
+		*max = simple_strtoul(last + 2, &last, 10);
+
+		/* fix order */
+		if (*max < *min)
+			swap(*min, *max);
+	}
+
+	/* decimation must be positive */
+	if (*min == 0)
+		return -EINVAL;
+
+	return 0;
+}
+
+static ssize_t overlay_x_decim_store(struct omap_overlay *ovl,
+						const char *buf, size_t size)
+{
+	int r;
+	struct omap_overlay_info info;
+
+	ovl->get_overlay_info(ovl, &info);
+
+	r = overlay_decim_store(&info.min_x_decim, &info.max_x_decim,
+				buf, size);
+
+	r = r ? : ovl->set_overlay_info(ovl, &info);
+
+	if (!r && ovl->manager)
+		r = ovl->manager->apply(ovl->manager);
+
+	return r ? : size;
+}
+
+static ssize_t overlay_y_decim_store(struct omap_overlay *ovl,
+						const char *buf, size_t size)
+{
+	int r;
+	struct omap_overlay_info info;
+
+	ovl->get_overlay_info(ovl, &info);
+
+	r = overlay_decim_store(&info.min_y_decim, &info.max_y_decim,
+				   buf, size);
+
+	r = r ? : ovl->set_overlay_info(ovl, &info);
+
+	if (!r && ovl->manager)
+		r = ovl->manager->apply(ovl->manager);
+
+	return r ? : size;
+}
+
 struct overlay_attribute {
 	struct attribute attr;
 	ssize_t (*show)(struct omap_overlay *, char *);
@@ -334,6 +459,12 @@ static OVERLAY_ATTR(global_alpha, S_IRUGO|S_IWUSR,
 static OVERLAY_ATTR(pre_mult_alpha, S_IRUGO|S_IWUSR,
 		overlay_pre_mult_alpha_show,
 		overlay_pre_mult_alpha_store);
+static OVERLAY_ATTR(x_decim, S_IRUGO|S_IWUSR,
+		overlay_x_decim_show, overlay_x_decim_store);
+static OVERLAY_ATTR(y_decim, S_IRUGO|S_IWUSR,
+		overlay_y_decim_show, overlay_y_decim_store);
+static OVERLAY_ATTR(zorder, S_IRUGO|S_IWUSR,
+		overlay_zorder_show, overlay_zorder_store);
 
 static struct attribute *overlay_sysfs_attrs[] = {
 	&overlay_attr_name.attr,
@@ -345,6 +476,9 @@ static struct attribute *overlay_sysfs_attrs[] = {
 	&overlay_attr_enabled.attr,
 	&overlay_attr_global_alpha.attr,
 	&overlay_attr_pre_mult_alpha.attr,
+	&overlay_attr_zorder.attr,
+	&overlay_attr_x_decim.attr,
+	&overlay_attr_y_decim.attr,
 	NULL
 };
 
@@ -449,27 +583,11 @@ int dss_check_overlay(struct omap_overlay *ovl, struct omap_dss_device *dssdev)
 		return -EINVAL;
 	}
 
-	return 0;
-}
-
-static int dss_ovl_set_overlay_info(struct omap_overlay *ovl,
-		struct omap_overlay_info *info)
-{
-	int r;
-	struct omap_overlay_info old_info;
-
-	old_info = ovl->info;
-	ovl->info = *info;
-
-	if (ovl->manager) {
-		r = dss_check_overlay(ovl, ovl->manager->device);
-		if (r) {
-			ovl->info = old_info;
-			return r;
-		}
+	if ((info->zorder < OMAP_DSS_OVL_ZORDER_0) ||
+			(info->zorder > OMAP_DSS_OVL_ZORDER_3)) {
+		DSSERR("overlay doesn't support zorder %d\n", info->zorder);
+		return -EINVAL;
 	}
-
-	ovl->info_dirty = true;
 
 	return 0;
 }
@@ -504,7 +622,6 @@ static int omap_dss_set_manager(struct omap_overlay *ovl,
 
 	ovl->manager = mgr;
 
-	dss_clk_enable(DSS_CLK_ICK | DSS_CLK_FCK);
 	/* XXX: When there is an overlay on a DSI manual update display, and
 	 * the overlay is first disabled, then moved to tv, and enabled, we
 	 * seem to get SYNC_LOST_DIGIT error.
@@ -518,7 +635,6 @@ static int omap_dss_set_manager(struct omap_overlay *ovl,
 	 * the overlay, but before moving the overlay to TV.
 	 */
 	dispc_set_channel_out(ovl->id, mgr->id);
-	dss_clk_disable(DSS_CLK_ICK | DSS_CLK_FCK);
 
 	return 0;
 }
@@ -592,6 +708,9 @@ void dss_overlay_setup_l4_manager(struct omap_overlay_manager *mgr)
 void dss_init_overlays(struct platform_device *pdev)
 {
 	int i, r;
+	const struct omap_dss_cconv_coefs ctbl_bt601_5 = {
+		298,  409,    0,  298, -208, -100,  298,    0,  517, 0,
+	};
 
 	INIT_LIST_HEAD(&overlay_list);
 
@@ -609,6 +728,7 @@ void dss_init_overlays(struct platform_device *pdev)
 			ovl->id = OMAP_DSS_GFX;
 			ovl->caps = OMAP_DSS_OVL_CAP_DISPC;
 			ovl->info.global_alpha = 255;
+			ovl->info.zorder = OMAP_DSS_OVL_ZORDER_0;
 			break;
 		case 1:
 			ovl->name = "vid1";
@@ -616,6 +736,9 @@ void dss_init_overlays(struct platform_device *pdev)
 			ovl->caps = OMAP_DSS_OVL_CAP_SCALE |
 				OMAP_DSS_OVL_CAP_DISPC;
 			ovl->info.global_alpha = 255;
+			ovl->info.zorder = dss_has_feature(FEAT_OVL_ZORDER) ?
+				OMAP_DSS_OVL_ZORDER_3 :
+				OMAP_DSS_OVL_ZORDER_0;
 			break;
 		case 2:
 			ovl->name = "vid2";
@@ -623,12 +746,31 @@ void dss_init_overlays(struct platform_device *pdev)
 			ovl->caps = OMAP_DSS_OVL_CAP_SCALE |
 				OMAP_DSS_OVL_CAP_DISPC;
 			ovl->info.global_alpha = 255;
+			ovl->info.zorder = dss_has_feature(FEAT_OVL_ZORDER) ?
+				OMAP_DSS_OVL_ZORDER_2 :
+				OMAP_DSS_OVL_ZORDER_0;
 			break;
+		case 3:
+			ovl->name = "vid3";
+			ovl->id = OMAP_DSS_VIDEO3;
+			ovl->caps = OMAP_DSS_OVL_CAP_SCALE |
+				OMAP_DSS_OVL_CAP_DISPC;
+			ovl->info.global_alpha = 255;
+			ovl->info.zorder = dss_has_feature(FEAT_OVL_ZORDER) ?
+				OMAP_DSS_OVL_ZORDER_1 :
+				OMAP_DSS_OVL_ZORDER_0;
+			break;
+
 		}
+
+		ovl->info.min_x_decim = ovl->info.min_y_decim = 1;
+		ovl->info.max_x_decim = ovl->info.max_y_decim =
+			cpu_is_omap44xx() ? 16 : 1;
+		ovl->info.cconv = ctbl_bt601_5;
 
 		ovl->set_manager = &omap_dss_set_manager;
 		ovl->unset_manager = &omap_dss_unset_manager;
-		ovl->set_overlay_info = &dss_ovl_set_overlay_info;
+		ovl->set_overlay_info = &omap_dss_ovl_set_info;
 		ovl->get_overlay_info = &dss_ovl_get_overlay_info;
 		ovl->wait_for_go = &dss_ovl_wait_for_go;
 
@@ -718,16 +860,18 @@ void dss_recheck_connections(struct omap_dss_device *dssdev, bool force)
 		}
 	}
 
-	if (mgr) {
+	if (mgr && force) {
+		dispc_runtime_get();
+
 		for (i = 0; i < dss_feat_get_num_ovls(); i++) {
 			struct omap_overlay *ovl;
 			ovl = omap_dss_get_overlay(i);
-			if (!ovl->manager || force) {
-				if (ovl->manager)
-					omap_dss_unset_manager(ovl);
-				omap_dss_set_manager(ovl, mgr);
-			}
+			if (ovl->manager)
+				omap_dss_unset_manager(ovl);
+			omap_dss_set_manager(ovl, mgr);
 		}
+
+		dispc_runtime_put();
 	}
 }
 

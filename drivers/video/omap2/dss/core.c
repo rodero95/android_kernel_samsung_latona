@@ -145,6 +145,11 @@ static int dss_initialize_debugfs(void)
 	debugfs_create_file("venc", S_IRUGO, dss_debugfs_dir,
 			&venc_dump_regs, &dss_debug_fops);
 #endif
+
+#ifdef CONFIG_OMAP4_DSS_HDMI
+	debugfs_create_file("hdmi", S_IRUGO, dss_debugfs_dir,
+			&hdmi_dump_regs, &dss_debug_fops);
+#endif
 	return 0;
 }
 
@@ -183,19 +188,16 @@ static int omap_dss_probe(struct platform_device *pdev)
 		goto err_dss;
 	}
 
-	/* keep clocks enabled to prevent context saves/restores during init */
-	dss_clk_enable(DSS_CLK_ICK | DSS_CLK_FCK);
+	r = dispc_init_platform_driver();
+	if (r) {
+		DSSERR("Failed to initialize dispc platform driver\n");
+		goto err_dispc;
+	}
 
 	r = rfbi_init_platform_driver();
 	if (r) {
 		DSSERR("Failed to initialize rfbi platform driver\n");
 		goto err_rfbi;
-	}
-
-	r = dispc_init_platform_driver();
-	if (r) {
-		DSSERR("Failed to initialize dispc platform driver\n");
-		goto err_dispc;
 	}
 
 	r = venc_init_platform_driver();
@@ -220,6 +222,9 @@ static int omap_dss_probe(struct platform_device *pdev)
 	if (r)
 		goto err_debugfs;
 
+	if (cpu_is_omap3630())
+		hpd_panel_init();
+
 	for (i = 0; i < pdata->num_devices; ++i) {
 		struct omap_dss_device *dssdev = pdata->devices[i];
 
@@ -238,11 +243,12 @@ static int omap_dss_probe(struct platform_device *pdev)
 			pdata->default_device = dssdev;
 	}
 
-	dss_clk_disable(DSS_CLK_ICK | DSS_CLK_FCK);
-
 	return 0;
 
 err_register:
+	if (cpu_is_omap3630())
+		hpd_panel_exit();
+
 	dss_uninitialize_debugfs();
 err_debugfs:
 	hdmi_uninit_platform_driver();
@@ -265,6 +271,9 @@ static int omap_dss_remove(struct platform_device *pdev)
 {
 	struct omap_dss_board_info *pdata = pdev->dev.platform_data;
 	int i;
+
+	if (cpu_is_omap3630())
+		hpd_panel_exit();
 
 	dss_uninitialize_debugfs();
 
@@ -424,6 +433,24 @@ static int dss_driver_remove(struct device *dev)
 	return 0;
 }
 
+static void omap_dss_driver_disable(struct omap_dss_device *dssdev)
+{
+	if (dssdev->state != OMAP_DSS_DISPLAY_DISABLED)
+		blocking_notifier_call_chain(&dssdev->state_notifiers,
+					OMAP_DSS_DISPLAY_DISABLED, dssdev);
+	dssdev->driver->disable_orig(dssdev);
+	dssdev->first_vsync = false;
+}
+
+static int omap_dss_driver_enable(struct omap_dss_device *dssdev)
+{
+	int r = dssdev->driver->enable_orig(dssdev);
+	if (!r && dssdev->state == OMAP_DSS_DISPLAY_ACTIVE)
+		blocking_notifier_call_chain(&dssdev->state_notifiers,
+					OMAP_DSS_DISPLAY_ACTIVE, dssdev);
+	return r;
+}
+
 int omap_dss_register_driver(struct omap_dss_driver *dssdriver)
 {
 	dssdriver->driver.bus = &dss_bus_type;
@@ -435,6 +462,11 @@ int omap_dss_register_driver(struct omap_dss_driver *dssdriver)
 	if (dssdriver->get_recommended_bpp == NULL)
 		dssdriver->get_recommended_bpp =
 			omapdss_default_get_recommended_bpp;
+
+	dssdriver->disable_orig = dssdriver->disable;
+	dssdriver->disable = omap_dss_driver_disable;
+	dssdriver->enable_orig = dssdriver->enable;
+	dssdriver->enable = omap_dss_driver_enable;
 
 	return driver_register(&dssdriver->driver);
 }

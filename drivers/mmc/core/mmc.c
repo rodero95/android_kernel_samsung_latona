@@ -95,6 +95,7 @@ static int mmc_decode_cid(struct mmc_card *card)
 		card->cid.prod_name[3]	= UNSTUFF_BITS(resp, 72, 8);
 		card->cid.prod_name[4]	= UNSTUFF_BITS(resp, 64, 8);
 		card->cid.prod_name[5]	= UNSTUFF_BITS(resp, 56, 8);
+		card->cid.fwrev		= UNSTUFF_BITS(resp, 48, 8);
 		card->cid.serial	= UNSTUFF_BITS(resp, 16, 32);
 		card->cid.month		= UNSTUFF_BITS(resp, 12, 4);
 		card->cid.year		= UNSTUFF_BITS(resp, 8, 4) + 1997;
@@ -412,6 +413,10 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 	else
 		card->erased_byte = 0x0;
 
+#ifdef CONFIG_MACH_OMAP_LATONA
+	card->ext_csd.hpi = ext_csd[EXT_CSD_HPI];
+#endif
+
 out:
 	return err;
 }
@@ -531,6 +536,27 @@ static struct device_type mmc_type = {
 	.groups = mmc_attr_groups,
 };
 
+static const struct mmc_fixup mmc_fixups[] = {
+	/*
+	 * There is a bug in some Samsung emmc chips where the wear leveling
+	 * code can insert 32 Kbytes of zeros into the storage.  We can patch
+	 * the firmware in such chips each time they are powered on to prevent
+	 * the bug from occurring.  Only apply this patch to a particular
+	 * revision of the firmware of the specified chips.  Date doesn't
+	 * matter, so include all possible dates in min and max fields.
+	 */
+	MMC_FIXUP_REV("VYL00M", 0x15, CID_OEMID_ANY,
+		      cid_rev(0, 0x25, 1997, 1), cid_rev(0, 0x25, 2012, 12),
+		      add_quirk_mmc, MMC_QUIRK_SAMSUNG_WL_PATCH),
+	MMC_FIXUP_REV("KYL00M", 0x15, CID_OEMID_ANY,
+		      cid_rev(0, 0x25, 1997, 1), cid_rev(0, 0x25, 2012, 12),
+		      add_quirk_mmc, MMC_QUIRK_SAMSUNG_WL_PATCH),
+	MMC_FIXUP_REV("MAG4FA", 0x15, CID_OEMID_ANY,
+		      cid_rev(0, 0x25, 1997, 1), cid_rev(0, 0x25, 2012, 12),
+		      add_quirk_mmc, MMC_QUIRK_SAMSUNG_WL_PATCH),
+	END_FIXUP
+};
+
 /*
  * Handle the detection and initialisation of a card.
  *
@@ -629,6 +655,10 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 		err = mmc_decode_cid(card);
 		if (err)
 			goto free_card;
+		/* Detect on first access quirky cards that need help when
+		 * powered-on
+		 */
+		mmc_fixup_device(card, mmc_fixups);
 	}
 
 	/*
@@ -747,13 +777,11 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 	if (mmc_card_highspeed(card)) {
 		if ((card->ext_csd.card_type & EXT_CSD_CARD_TYPE_DDR_1_8V)
 			&& ((host->caps & (MMC_CAP_1_8V_DDR |
-			     MMC_CAP_UHS_DDR50))
-				== (MMC_CAP_1_8V_DDR | MMC_CAP_UHS_DDR50)))
+			     MMC_CAP_UHS_DDR50))))
 				ddr = MMC_1_8V_DDR_MODE;
 		else if ((card->ext_csd.card_type & EXT_CSD_CARD_TYPE_DDR_1_2V)
 			&& ((host->caps & (MMC_CAP_1_2V_DDR |
-			     MMC_CAP_UHS_DDR50))
-				== (MMC_CAP_1_2V_DDR | MMC_CAP_UHS_DDR50)))
+			     MMC_CAP_UHS_DDR50))))
 				ddr = MMC_1_2V_DDR_MODE;
 	}
 
@@ -846,6 +874,14 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 		host->card = card;
 
 	mmc_free_ext_csd(ext_csd);
+
+	/*
+	 * Patch the firmware in certain Samsung emmc chips to fix a
+	 * wear leveling bug.
+	 */
+	if (card->quirks & MMC_QUIRK_SAMSUNG_WL_PATCH)
+		mmc_fixup_samsung_fw(card);
+
 	return 0;
 
 free_card:
@@ -903,16 +939,20 @@ static void mmc_detect(struct mmc_host *host)
  */
 static int mmc_suspend(struct mmc_host *host)
 {
+	int err = 0;
+
 	BUG_ON(!host);
 	BUG_ON(!host->card);
 
 	mmc_claim_host(host);
-	if (!mmc_host_is_spi(host))
+	if (mmc_card_can_sleep(host))
+		err = mmc_card_sleep(host);
+	else if (!mmc_host_is_spi(host))
 		mmc_deselect_cards(host);
 	host->card->state &= ~MMC_STATE_HIGHSPEED;
 	mmc_release_host(host);
 
-	return 0;
+	return err;
 }
 
 /*
@@ -1063,6 +1103,30 @@ int mmc_attach_mmc(struct mmc_host *host)
 	err = mmc_init_card(host, host->ocr, NULL);
 	if (err)
 		goto err;
+
+#ifdef CONFIG_MACH_OMAP_LATONA
+	int i = 0;
+	/* WA : Lock/Unlock CMD in case of 32nm iNAND */
+	/*check iNAND*/
+	if (host->card->cid.manfid == 0x45 || host->card->cid.manfid == 0x02) {
+		/*check 32nm*/
+		if (!(host->card->ext_csd.hpi & 0x1)) {
+			printk(KERN_DEBUG "%s: Lock-unlock started, MID=0x%x, HPI=0x%x\n",
+				__func__, host->card->cid.manfid, host->card->ext_csd.hpi);
+			for (i = 0 ; i < 50 ; i++) {
+				if (mmc_send_lock_cmd(host, 1)) {
+					printk(KERN_ERR "%s: eMMC lock CMD is failed.\n", mmc_hostname(host));
+					goto remove_card;
+				}
+				if (mmc_send_lock_cmd(host, 0)) {
+					printk(KERN_ERR "%s: eMMC unlock CMD is failed.\n", mmc_hostname(host));
+					goto remove_card;
+				}
+			}
+			printk(KERN_DEBUG "%s:COMPLETED\n",__func__);
+		}
+	}
+#endif
 
 	mmc_release_host(host);
 	err = mmc_add_card(host->card);

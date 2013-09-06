@@ -29,6 +29,7 @@
 #include <linux/kfifo.h>
 #include <linux/err.h>
 #include <linux/notifier.h>
+#include <linux/pm_qos_params.h>
 
 #include <plat/mailbox.h>
 
@@ -36,6 +37,10 @@ static struct omap_mbox **mboxes;
 
 static int mbox_configured;
 static DEFINE_MUTEX(mbox_configured_lock);
+struct pm_qos_request_list mbox_qos_request;
+
+#define SET_MPU_CORE_CONSTRAINT 10
+#define CLEAR_MPU_CORE_CONSTRAINT -1
 
 static unsigned int mbox_kfifo_size = CONFIG_OMAP_MBOX_KFIFO_SIZE;
 module_param(mbox_kfifo_size, uint, S_IRUGO);
@@ -260,13 +265,6 @@ static int omap_mbox_startup(struct omap_mbox *mbox)
 	}
 
 	if (!mbox->use_count++) {
-		ret = request_irq(mbox->irq, mbox_interrupt, IRQF_SHARED,
-							mbox->name, mbox);
-		if (unlikely(ret)) {
-			pr_err("failed to register mailbox interrupt:%d\n",
-									ret);
-			goto fail_request_irq;
-		}
 		mq = mbox_queue_alloc(mbox, NULL, mbox_tx_tasklet);
 		if (!mq) {
 			ret = -ENOMEM;
@@ -281,20 +279,29 @@ static int omap_mbox_startup(struct omap_mbox *mbox)
 		}
 		mbox->rxq = mq;
 		mq->mbox = mbox;
+		ret = request_irq(mbox->irq, mbox_interrupt, IRQF_SHARED,
+							mbox->name, mbox);
+		if (unlikely(ret)) {
+			pr_err("failed to register mailbox interrupt:%d\n",
+									ret);
+			goto fail_request_irq;
+		}
 	}
 	mutex_unlock(&mbox_configured_lock);
 	return 0;
 
+fail_request_irq:
+	mbox_queue_free(mbox->rxq);
 fail_alloc_rxq:
 	mbox_queue_free(mbox->txq);
 fail_alloc_txq:
-	free_irq(mbox->irq, mbox);
-fail_request_irq:
 	if (mbox->ops->shutdown)
 		mbox->ops->shutdown(mbox);
 	mbox->use_count--;
 fail_startup:
-	mbox_configured--;
+	if (!--mbox_configured)
+		pm_qos_update_request(&mbox_qos_request,
+					 CLEAR_MPU_CORE_CONSTRAINT);
 	mutex_unlock(&mbox_configured_lock);
 	return ret;
 }
@@ -306,14 +313,17 @@ static void omap_mbox_fini(struct omap_mbox *mbox)
 	if (!--mbox->use_count) {
 		free_irq(mbox->irq, mbox);
 		tasklet_kill(&mbox->txq->tasklet);
-	flush_work_sync(&mbox->rxq->work);
+		flush_work_sync(&mbox->rxq->work);
 		mbox_queue_free(mbox->txq);
 		mbox_queue_free(mbox->rxq);
 	}
 
 	if (likely(mbox->ops->shutdown)) {
-		if (!--mbox_configured)
+		if (!--mbox_configured) {
 			mbox->ops->shutdown(mbox);
+			pm_qos_update_request(&mbox_qos_request,
+						CLEAR_MPU_CORE_CONSTRAINT);
+		}
 	}
 
 	mutex_unlock(&mbox_configured_lock);
@@ -350,7 +360,8 @@ EXPORT_SYMBOL(omap_mbox_get);
 
 void omap_mbox_put(struct omap_mbox *mbox, struct notifier_block *nb)
 {
-	blocking_notifier_chain_unregister(&mbox->notifier, nb);
+	if (nb)
+		blocking_notifier_chain_unregister(&mbox->notifier, nb);
 	omap_mbox_fini(mbox);
 }
 EXPORT_SYMBOL(omap_mbox_put);
@@ -395,6 +406,7 @@ int omap_mbox_unregister(void)
 
 	for (i = 0; mboxes[i]; i++)
 		device_unregister(mboxes[i]->dev);
+
 	mboxes = NULL;
 	return 0;
 }
@@ -413,6 +425,8 @@ static int __init omap_mbox_init(void)
 	mbox_kfifo_size = max_t(unsigned int, mbox_kfifo_size,
 							sizeof(mbox_msg_t));
 
+	pm_qos_add_request(&mbox_qos_request, PM_QOS_CPU_DMA_LATENCY,
+						PM_QOS_DEFAULT_VALUE);
 	return 0;
 }
 subsys_initcall(omap_mbox_init);
@@ -420,6 +434,7 @@ subsys_initcall(omap_mbox_init);
 static void __exit omap_mbox_exit(void)
 {
 	class_unregister(&omap_mbox_class);
+	pm_qos_remove_request(&mbox_qos_request);
 }
 module_exit(omap_mbox_exit);
 

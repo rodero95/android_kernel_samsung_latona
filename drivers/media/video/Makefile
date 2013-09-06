@@ -71,6 +71,14 @@ obj-$(CONFIG_VIDEO_SR030PC30)	+= sr030pc30.o
 obj-$(CONFIG_VIDEO_NOON010PC30)	+= noon010pc30.o
 obj-$(CONFIG_VIDEO_M5MOLS)	+= m5mols/
 
+obj-$(CONFIG_VIDEO_IMX046) += imx046.o
+obj-$(CONFIG_VIDEO_LV8093) += lv8093.o
+obj-y += isp/
+
+obj-$(CONFIG_VIDEO_CAM_PMIC)     += cam_pmic.o
+obj-$(CONFIG_VIDEO_CAM_CE147)    += ce147_platform.o ce147.o
+obj-$(CONFIG_VIDEO_CAM_S5KA3DFX) += s5ka3dfx_platform.o s5ka3dfx.o
+obj-$(CONFIG_VIDEO_OMAP3) += omap34xxcam.o
 obj-$(CONFIG_SOC_CAMERA_IMX074)		+= imx074.o
 obj-$(CONFIG_SOC_CAMERA_MT9M001)	+= mt9m001.o
 obj-$(CONFIG_SOC_CAMERA_MT9M111)	+= mt9m111.o
@@ -131,8 +139,6 @@ obj-$(CONFIG_VIDEO_CAFE_CCIC) += cafe_ccic.o
 
 obj-$(CONFIG_VIDEO_VIA_CAMERA) += via-camera.o
 
-obj-$(CONFIG_VIDEO_OMAP3)	+= omap3isp/
-
 obj-$(CONFIG_USB_ZR364XX)       += zr364xx.o
 obj-$(CONFIG_USB_STKWEBCAM)     += stkwebcam.o
 
@@ -183,6 +189,8 @@ obj-$(CONFIG_VIDEO_IR_I2C)  += ir-kbd-i2c.o
 obj-y	+= davinci/
 
 obj-$(CONFIG_ARCH_OMAP)	+= omap/
+obj-$(CONFIG_TI_TILER)	+= tiler/
+obj-$(CONFIG_VIDEO_OMAP_GFX) += omapgfx/
 
 EXTRA_CFLAGS += -Idrivers/media/dvb/dvb-core
 EXTRA_CFLAGS += -Idrivers/media/dvb/frontends

@@ -33,6 +33,7 @@
 #include <linux/platform_device.h>
 #include <linux/clk.h>
 #include <linux/err.h>
+#include <linux/interrupt.h>
 
 #include <linux/regulator/machine.h>
 
@@ -83,7 +84,13 @@
 #define twl_has_madc()	false
 #endif
 
-#ifdef CONFIG_TWL4030_POWER
+#if defined(CONFIG_TWL6030_GPADC) || defined(CONFIG_TWL6030_GPADC_MODULE)
+#define twl_has_gpadc()	true
+#else
+#define twl_has_gpadc()	false
+#endif
+
+#if defined(CONFIG_TWL4030_POWER) || defined(CONFIG_TWL6030_POWER)
 #define twl_has_power()        true
 #else
 #define twl_has_power()        false
@@ -116,7 +123,10 @@
 #define twl_has_codec()	false
 #endif
 
-#if defined(CONFIG_CHARGER_TWL4030) || defined(CONFIG_CHARGER_TWL4030_MODULE)
+#if defined(CONFIG_CHARGER_TWL4030) || \
+	defined(CONFIG_CHARGER_TWL4030_MODULE) || \
+	defined(CONFIG_TWL6030_BCI_BATTERY) || \
+	defined(CONFIG_TWL6030_BCI_BATTERY_MODULE)
 #define twl_has_bci()	true
 #else
 #define twl_has_bci()	false
@@ -126,6 +136,7 @@
 
 /* Last - for index max*/
 #define TWL4030_MODULE_LAST		TWL4030_MODULE_SECURED_REG
+#define TWL6030_MODULE_LAST		TWL6030_MODULE_SLAVE_RES
 
 #define TWL_NUM_SLAVES		4
 
@@ -136,12 +147,19 @@
 #define twl_has_pwrbutton()	false
 #endif
 
+#if defined(CONFIG_INPUT_TWL6030_PWRBUTTON) \
+	|| defined(CONFIG_INPUT_TWL6030_PWRBUTTON_MODULE)
+#define twl6030_has_pwrbutton()        true
+#else
+#define twl6030_has_pwrbutton()        false
+#endif
+
 #define SUB_CHIP_ID0 0
 #define SUB_CHIP_ID1 1
 #define SUB_CHIP_ID2 2
 #define SUB_CHIP_ID3 3
 
-#define TWL_MODULE_LAST TWL4030_MODULE_LAST
+#define TWL_MODULE_LAST TWL6030_MODULE_LAST
 
 /* Base Address defns for twl4030_map[] */
 
@@ -187,6 +205,7 @@
 #define TWL6030_BASEADD_MEM		0x0017
 #define TWL6030_BASEADD_PM_MASTER	0x001F
 #define TWL6030_BASEADD_PM_SLAVE_MISC	0x0030 /* PM_RECEIVER */
+#define TWL6030_BASEADD_PM_SLAVE_RES	0x00AD
 #define TWL6030_BASEADD_PM_MISC		0x00E2
 #define TWL6030_BASEADD_PM_PUPD		0x00F0
 
@@ -333,6 +352,7 @@ static struct twl_mapping twl6030_map[] = {
 	{ SUB_CHIP_ID0, TWL6030_BASEADD_RTC },
 	{ SUB_CHIP_ID0, TWL6030_BASEADD_MEM },
 	{ SUB_CHIP_ID1, TWL6025_BASEADD_CHARGER },
+	{ SUB_CHIP_ID0, TWL6030_BASEADD_PM_SLAVE_RES },
 };
 
 /*----------------------------------------------------------------------*/
@@ -386,8 +406,9 @@ int twl_i2c_write(u8 mod_no, u8 *value, u8 reg, unsigned num_bytes)
 
 	/* i2c_transfer returns number of messages transferred */
 	if (ret != 1) {
-		pr_err("%s: i2c_write failed to transfer all messages\n",
-			DRIVER_NAME);
+		pr_err("%s: i2c_write failed to transfer all messages "
+			"(addr 0x%04x, reg %d, len %d)\n",
+			DRIVER_NAME, twl->address, reg, msg->len);
 		if (ret < 0)
 			return ret;
 		else
@@ -445,8 +466,9 @@ int twl_i2c_read(u8 mod_no, u8 *value, u8 reg, unsigned num_bytes)
 
 	/* i2c_transfer returns number of messages transferred */
 	if (ret != 2) {
-		pr_err("%s: i2c_read failed to transfer all messages\n",
-			DRIVER_NAME);
+		pr_err("%s: i2c_read failed to transfer all messages "
+			"(addr 0x%04x, reg %d, len %d)\n",
+			DRIVER_NAME, twl->address, reg, msg->len);
 		if (ret < 0)
 			return ret;
 		else
@@ -660,11 +682,28 @@ add_children(struct twl4030_platform_data *pdata, unsigned long features)
 		if (IS_ERR(child))
 			return PTR_ERR(child);
 	}
+	if (twl_has_bci() && pdata->bci) {
+		child = add_child(1, "twl6030_bci",
+				pdata->bci, sizeof(*pdata->bci),
+				false,
+				pdata->irq_base + CHARGER_INTR_OFFSET,
+				pdata->irq_base + CHARGERFAULT_INTR_OFFSET);
+	}
+
 
 	if (twl_has_madc() && pdata->madc) {
 		child = add_child(2, "twl4030_madc",
 				pdata->madc, sizeof(*pdata->madc),
 				true, pdata->irq_base + MADC_INTR_OFFSET, 0);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
+	}
+
+	if (twl_has_gpadc() && pdata->madc) {
+		child = add_child(1, "twl6030_gpadc",
+				pdata->madc, sizeof(*pdata->madc),
+				true, pdata->irq_base + MADC_INTR_OFFSET,
+				pdata->irq_base + GPADCSW_INTR_OFFSET);
 		if (IS_ERR(child))
 			return PTR_ERR(child);
 	}
@@ -815,6 +854,13 @@ add_children(struct twl4030_platform_data *pdata, unsigned long features)
 			return PTR_ERR(child);
 	}
 
+	if (twl6030_has_pwrbutton()) {
+		child = add_child(1, "twl6030_pwrbutton",
+				NULL, 0, true, pdata->irq_base, 0);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
+	}
+
 	if (twl_has_codec() && pdata->codec && twl_class_is_4030()) {
 		sub_chip_id = twl_map[TWL_MODULE_AUDIO_VOICE].sid;
 		child = add_child(sub_chip_id, "twl4030-audio",
@@ -827,7 +873,7 @@ add_children(struct twl4030_platform_data *pdata, unsigned long features)
 	/* Phoenix codec driver is probed directly atm */
 	if (twl_has_codec() && pdata->codec && twl_class_is_6030()) {
 		sub_chip_id = twl_map[TWL_MODULE_AUDIO_VOICE].sid;
-		child = add_child(sub_chip_id, "twl6040-codec",
+		child = add_child(sub_chip_id, "twl6040-audio",
 				pdata->codec, sizeof(*pdata->codec),
 				false, 0, 0);
 		if (IS_ERR(child))
@@ -970,6 +1016,36 @@ add_children(struct twl4030_platform_data *pdata, unsigned long features)
 					features);
 		if (IS_ERR(child))
 			return PTR_ERR(child);
+
+		child = add_regulator(TWL6030_REG_CLK32KAUDIO,
+				pdata->clk32kaudio, features);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
+
+		child = add_regulator(TWL6030_REG_VDD1, pdata->vdd1,
+					features);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
+
+		child = add_regulator(TWL6030_REG_VDD2, pdata->vdd2,
+					features);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
+
+		child = add_regulator(TWL6030_REG_VDD3, pdata->vdd3,
+					features);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
+
+		child = add_regulator(TWL6030_REG_VMEM, pdata->vmem,
+					features);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
+
+		child = add_regulator(TWL6030_REG_V2V1, pdata->v2v1,
+					features);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
 	}
 
 	/* 6030 and 6025 share this regulator */
@@ -1040,8 +1116,10 @@ add_children(struct twl4030_platform_data *pdata, unsigned long features)
 
 	}
 
+/* Removed (features & TWL6030_CLASS) condition check */
 	if (twl_has_bci() && pdata->bci &&
-			!(features & (TPS_SUBSET | TWL5031))) {
+			(!(features & (TPS_SUBSET | TWL5031)) ||
+					(features & TWL6030_CLASS))) {
 		child = add_child(3, "twl4030_bci",
 				pdata->bci, sizeof(*pdata->bci), false,
 				/* irq0 = CHG_PRES, irq1 = BCI */
@@ -1142,6 +1220,15 @@ static void clocks_init(struct device *dev,
 
 	if (e < 0)
 		pr_err("%s: clock init err [%d]\n", DRIVER_NAME, e);
+
+	/* ENABLE TRITON ADC CLOCK */
+	{
+		u8 val = 0;
+
+		// set GPBR1 register MADC_HFCLK_EN -> 1, DEFAULT_MADC_CLK_EN -> 1 
+		twl_i2c_read_u8( TWL4030_MODULE_INTBR, &val, 0x0C);
+		twl_i2c_write_u8( TWL4030_MODULE_INTBR, (val | 0x90), 0x0C );
+	}
 }
 
 /*----------------------------------------------------------------------*/
@@ -1152,7 +1239,28 @@ int twl4030_init_chip_irq(const char *chip);
 int twl6030_init_irq(int irq_num, unsigned irq_base, unsigned irq_end);
 int twl6030_exit_irq(void);
 
-static int twl_remove(struct i2c_client *client)
+#ifdef CONFIG_PM
+static int twl_suspend(struct i2c_client *client, pm_message_t mesg)
+{
+	if (!cpu_is_omap34xx())
+		return irq_set_irq_wake(client->irq, 1);
+	else
+		return 0;
+}
+
+static int twl_resume(struct i2c_client *client)
+{
+	if (!cpu_is_omap34xx())
+		return irq_set_irq_wake(client->irq, 0);
+	else
+		return 0;
+}
+#else
+#define twl_suspend	NULL
+#define twl_resume	NULL
+#endif
+
+static int __devexit twl_remove(struct i2c_client *client)
 {
 	unsigned i;
 	int status;
@@ -1205,6 +1313,7 @@ twl_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		struct twl_client	*twl = &twl_modules[i];
 
 		twl->address = client->addr + i;
+
 		if (i == 0)
 			twl->client = client;
 		else {
@@ -1238,8 +1347,14 @@ twl_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	}
 
 	/* load power event scripts */
-	if (twl_has_power() && pdata->power)
-		twl4030_power_init(pdata->power);
+	if (twl_has_power()) {
+		if (twl_class_is_4030() && pdata->power) {
+			twl4030_power_sr_init();
+			twl4030_power_init(pdata->power);
+		}
+		if (twl_class_is_6030())
+			twl6030_power_init(pdata->power);
+	}
 
 	/* Maybe init the T2 Interrupt subsystem */
 	if (client->irq
@@ -1295,7 +1410,9 @@ static struct i2c_driver twl_driver = {
 	.driver.name	= DRIVER_NAME,
 	.id_table	= twl_ids,
 	.probe		= twl_probe,
-	.remove		= twl_remove,
+	.remove		= __devexit_p(twl_remove),
+	.suspend	= twl_suspend,
+	.resume		= twl_resume,
 };
 
 static int __init twl_init(void)
