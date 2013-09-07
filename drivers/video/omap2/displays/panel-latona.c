@@ -102,7 +102,7 @@ static struct omap_video_timings nt35510_hitachi_panel_timings = {
 
 	.x_res          = 480,
 	.y_res          = 800,
-	.pixel_clock    = LCD_PIXCLOCK_MAX,
+	.pixel_clock    = 28800,
 	.hfp            = 100,
 	.hsw            = 2,
 	.hbp            = 2,
@@ -117,7 +117,7 @@ static struct omap_video_timings nt35510_smd_panel_timings = {
 
 	.x_res          = 480,
 	.y_res          = 800,
-	.pixel_clock    = LCD_PIXCLOCK_MAX,
+	.pixel_clock    = 27000,
 	.hfp            = 10,
 	.hsw            = 4,
 	.hbp            = 40,

@@ -185,6 +185,7 @@ struct t7_config {
 #define MXT_BACKUP_TIME		25	/* msec */
 #define MXT_RESET_TIME		65	/* msec */
 #define MXT_ENABLE_TIME		80	/* msec */
+#define MXT_CAL_TIME		25	/* msec */
 
 #define MXT_FWRESET_TIME	175	/* msec */
 #define MXT_WAKEUP_TIME		25	/* msec */
@@ -1055,6 +1056,27 @@ static void mxt_calc_resolution(struct mxt_data *data)
 	}
 }
 
+static ssize_t mxt_calibrate_store(struct device *dev,
+				   struct device_attribute *attr,
+				   const char *buf, size_t count)
+{
+	struct mxt_data *data = dev_get_drvdata(dev);
+	int ret;
+
+	disable_irq(data->irq);
+
+	/* Perform touch surface recalibration */
+	ret = mxt_write_object(data, MXT_GEN_COMMAND,
+			MXT_COMMAND_CALIBRATE, 1);
+	if (ret)
+		goto out;
+	msleep(MXT_CAL_TIME);
+
+out:
+	enable_irq(data->irq);
+	return ret ?: count;
+}
+
 static ssize_t mxt_object_show(struct device *dev,
 				    struct device_attribute *attr, char *buf)
 {
@@ -1198,12 +1220,74 @@ static ssize_t mxt_update_fw_store(struct device *dev,
 	return count;
 }
 
+static DEVICE_ATTR(calibrate, 0664, NULL, mxt_calibrate_store);
+static ssize_t mxt_threshold_screen_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	struct mxt_data *data = dev_get_drvdata(dev);
+	u8 threshold;
+
+	mxt_read_object(data, MXT_TOUCH_MULTI,
+		MXT_TOUCH_TCHTHR, &threshold);
+	return snprintf(buf, PAGE_SIZE, "%d\n", threshold);
+}
+
+static ssize_t mxt_threshold_screen_store(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct mxt_data *data = dev_get_drvdata(dev);
+	u8 threshold;
+
+	if (sscanf(buf, "%d", &threshold) < 0)
+		return -EINVAL;
+
+	mxt_write_object(data, MXT_TOUCH_MULTI,
+			MXT_TOUCH_TCHTHR, threshold);
+
+	return count;
+}
+
+static ssize_t mxt_threshold_keys_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	struct mxt_data *data = dev_get_drvdata(dev);
+	u8 threshold;
+
+	mxt_read_object(data, MXT_TOUCH_KEYARRAY,
+		MXT_TOUCH_TCHTHR, &threshold);
+	return snprintf(buf, PAGE_SIZE, "%d\n", threshold);
+}
+
+static ssize_t mxt_threshold_keys_store(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct mxt_data *data = dev_get_drvdata(dev);
+	u8 threshold;
+
+	if (sscanf(buf, "%d", &threshold) < 0)
+		return -EINVAL;
+
+	mxt_write_object(data, MXT_TOUCH_KEYARRAY,
+			MXT_TOUCH_TCHTHR, threshold);
+
+	return count;
+}
+
 static DEVICE_ATTR(object, 0444, mxt_object_show, NULL);
 static DEVICE_ATTR(update_fw, 0664, NULL, mxt_update_fw_store);
+static DEVICE_ATTR(threshold_screen, 0644,
+	mxt_threshold_screen_show, mxt_threshold_screen_store);
+static DEVICE_ATTR(threshold_keys, 0644,
+	mxt_threshold_keys_show, mxt_threshold_keys_store);
 
 static struct attribute *mxt_attrs[] = {
+	&dev_attr_calibrate.attr,
 	&dev_attr_object.attr,
 	&dev_attr_update_fw.attr,
+	&dev_attr_threshold_screen.attr,
+	&dev_attr_threshold_keys.attr,
 	NULL
 };
 
@@ -1272,11 +1356,17 @@ static int mxt_resume(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct mxt_data *data = i2c_get_clientdata(client);
 	struct input_dev *input_dev = data->input_dev;
-
+	int ret;
+	
 	gpio_direction_output(data->pdata->tsp_en_gpio, 1);
 	msleep(MXT_ENABLE_TIME);
 
-	enable_irq(data->irq);
+	/* Send a calibration command on System Resume */
+		ret = mxt_write_object(data, MXT_GEN_COMMAND,
+				       MXT_COMMAND_CALIBRATE, 1);
+		if (ret)
+			dev_err(dev, "Resume recalibration failed %d\n", ret);
+		msleep(MXT_CAL_TIME);
 
 	msleep(MXT_RESET_TIME);
 
@@ -1287,6 +1377,8 @@ static int mxt_resume(struct device *dev)
 
 	mutex_unlock(&input_dev->mutex);
 
+	enable_irq(data->irq);
+	
 #ifdef CONFIG_LEDS_LATONA
 	latona_leds_report_event(KEY_POWER, 1);
 #endif

@@ -461,6 +461,7 @@ void omap_sram_idle(bool suspend)
 	if (per_next_state < PWRDM_POWER_ON && core_next_state < PWRDM_POWER_ON) {
 		per_going_off = (per_next_state == PWRDM_POWER_OFF) ? 1 : 0;
 		if (omap2_gpio_prepare_for_idle(per_going_off, suspend)) {
+			printk("%s: abort_gpio\n", __func__);
 			pwrdm_post_transition();
 			goto abort_gpio;
 		}
@@ -624,14 +625,6 @@ static int omap3_pm_suspend(void)
 		if (pwrdm_clear_all_prev_pwrst(pwrst->pwrdm))
 			goto restore;
 	}
-
-#ifdef CONFIG_MACH_OMAP_LATONA
-//idle current optimisation
-		omap_writel(omap_readl(0x48004E00)|0x0,0x48004E00);     //CM_FCLKEN_DSS->EN_DSS1
-		omap_writel(omap_readl(0x48004E10)|0x0, 0x48004E10);     //CM_ICLKEN_DSS->EN_DSS1
-		omap_writel((omap_readl(0x48004E44) |0x2), 0x48004E44); // CM_SLEEPDEP_DSS
-//idle current optimisation
-#endif
 
 	omap3_intc_suspend();
 
