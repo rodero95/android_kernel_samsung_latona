@@ -90,7 +90,7 @@ static ssize_t yas_acc_filter_enable_show(struct device *, struct device_attribu
 static ssize_t yas_acc_filter_enable_store(struct device *, struct device_attribute *, const char *, size_t);
 static ssize_t yas_acc_wake_store(struct device *, struct device_attribute *, const char *, size_t);
 static ssize_t yas_acc_private_data_show(struct device *, struct device_attribute *, char *);
-#if DEBUG
+#if YAS_DEBUG
 static ssize_t yas_acc_debug_reg_show(struct device *, struct device_attribute *, char *);
 static int yas_acc_suspend(struct device *dev);
 static int yas_acc_resume(struct device *dev);
@@ -611,7 +611,7 @@ static ssize_t yas_acc_private_data_show(struct device *dev,
     return sprintf(buf, "%d %d %d\n", accel.xyz.v[0], accel.xyz.v[1], accel.xyz.v[2]);
 }
 
-#if DEBUG
+#if YAS_DEBUG
 #if YAS_ACC_DRIVER == YAS_ACC_DRIVER_BMA150
 #define ADR_MAX (0x16)
 #elif YAS_ACC_DRIVER == YAS_ACC_DRIVER_BMA222
@@ -692,7 +692,7 @@ static ssize_t yas_acc_debug_suspend_store(struct device *dev,
 
     return count;
 }
-#endif /* DEBUG */
+#endif /* YAS_DEBUG */
 
   
 static int bma222_fast_calibration(char layout[])
@@ -756,11 +756,6 @@ static int bma222_fast_calibration(char layout[])
     return 0;
 }
 
-static ssize_t bma222_calibration_show(struct device *dev,
-                                       struct device_attribute *attr, char *buf)
-{
-}
-
 static ssize_t bma222_calibration_store(struct device *dev,
                                         struct device_attribute *attr,
                                         const char *buf, size_t count)
@@ -814,10 +809,10 @@ static DEVICE_ATTR(raw_data,
                    S_IRUGO,
                    yas_acc_private_data_show,
                    NULL);
-static DEVICE_ATTR(calibration, S_IRUGO|S_IWUSR|S_IWGRP,
-                   bma222_calibration_show, bma222_calibration_store);
+static DEVICE_ATTR(calibration, S_IWUSR|S_IWGRP,
+                   NULL, bma222_calibration_store);
 
-#if DEBUG
+#if YAS_DEBUG
 static DEVICE_ATTR(debug_reg,
                    S_IRUGO,
                    yas_acc_debug_reg_show,
@@ -828,13 +823,7 @@ static DEVICE_ATTR(debug_suspend,
                    yas_acc_debug_suspend_show,
                    yas_acc_debug_suspend_store
                    );
-#endif /* DEBUG */
-
-static struct attribute *accel_sensor_attrs[] = {
-    &dev_attr_calibration.attr,
-    &dev_attr_raw_data.attr,
-    NULL
-};
+#endif /* YAS_DEBUG */
 
 static struct attribute *yas_acc_attributes[] = {
     &dev_attr_enable.attr,
@@ -844,10 +833,12 @@ static struct attribute *yas_acc_attributes[] = {
     &dev_attr_threshold.attr,
     &dev_attr_filter_enable.attr,
     &dev_attr_wake.attr,
-#if DEBUG
+    &dev_attr_calibration.attr,
+    &dev_attr_raw_data.attr,
+#if YAS_DEBUG
     &dev_attr_debug_reg.attr,
     &dev_attr_debug_suspend.attr,
-#endif /* DEBUG */
+#endif /* YAS_DEBUG */
     NULL
 };
 
@@ -924,8 +915,6 @@ static int yas_acc_resume(struct device *dev)
     return 0;
 }
 
-extern struct class *sensors_class;
-extern int sensors_register(struct device *dev, void * drvdata, struct device_attribute *attributes[], char *name);
 static struct device *accel_sensor_device;
 
 static int yas_acc_probe(struct i2c_client *client, const struct i2c_device_id *id)
@@ -975,13 +964,7 @@ static int yas_acc_probe(struct i2c_client *client, const struct i2c_device_id *
         goto ERR4;
     }
 
-    err = sensors_register(accel_sensor_device, NULL, accel_sensor_attrs, "accelerometer_sensor");
-    if(err) {
-    	printk(KERN_ERR "%s: cound not register accelerometer sensor device(%d).\n", __func__, err);
-    }
-	
-	printk(KERN_ERR "bma222_init_proc -\n");
-
+    printk(KERN_ERR "bma222_init_proc -\n");
 
     return 0;
 
@@ -1038,7 +1021,7 @@ struct i2c_driver yas_acc_driver = {
  * ---------------------------------------------------------------------------------------- */
 static int __init yas_acc_init(void)
 {
-    i2c_add_driver(&yas_acc_driver);
+    return i2c_add_driver(&yas_acc_driver);
 }
 module_init(yas_acc_init);
 
