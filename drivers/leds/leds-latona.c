@@ -25,7 +25,7 @@
 
 #define DRIVER_NAME "LatonaLedDriver"
 
-#ifdef CONFIG_LEDS_LATONA_BACKLIGHT
+#ifdef CONFIG_LEDS_LATONA_BACKLIGHT_TIMEOUT
 //Touch Keys State
 #define TOUCHKEY_ALL 0
 #define TOUCHKEY_MENU 1
@@ -148,13 +148,13 @@ static void latona_led_set(struct led_classdev *led_cdev,
 	if (value == LED_OFF) {
 		gpio_set_value(OMAP_GPIO_LED_EN1, 0);
 		gpio_set_value(OMAP_GPIO_LED_EN2, 0);
-#ifdef CONFIG_LEDS_LATONA_BACKLIGHT
+#ifdef CONFIG_LEDS_LATONA_BACKLIGHT_TIMEOUT
 		notification = 0;
 #endif
 	} else {
 		gpio_set_value(OMAP_GPIO_LED_EN1, 1);
 		gpio_set_value(OMAP_GPIO_LED_EN2, 1);
-#ifdef CONFIG_LEDS_LATONA_BACKLIGHT
+#ifdef CONFIG_LEDS_LATONA_BACKLIGHT_TIMEOUT
 		notification = 1;
 #endif
 	}
@@ -176,7 +176,7 @@ static int latona_led_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-#ifdef CONFIG_LEDS_LATONA_BACKLIGHT
+#ifdef CONFIG_LEDS_LATONA_BACKLIGHT_TIMEOUT
 	ret = device_create_file(latona_led.dev, &dev_attr_bl_timeout);
 	if (ret < 0) {
 		pr_err("%s: Failed to create device file %s\n",
@@ -192,7 +192,7 @@ static int latona_led_probe(struct platform_device *pdev)
 
 static int __devexit latona_led_remove(struct platform_device *pdev)
 {
-#ifdef CONFIG_LEDS_LATONA_BACKLIGHT
+#ifdef CONFIG_LEDS_LATONA_BACKLIGHT_TIMEOUT
 	del_timer(&bl_timer);
 #endif
 	led_classdev_unregister(&latona_led);
