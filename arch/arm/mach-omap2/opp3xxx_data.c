@@ -88,6 +88,7 @@ struct omap_vdd_dep_info omap34xx_vddmpu_dep_info[] = {
 #define OMAP3630_VDD_MPU_OPP1G_UV		1375000
 #define OMAP3630_VDD_MPU_OPP2G_UV		1400000
 
+
 /* Amount in uV to add to SmartReflex-calculated voltages as a safety margin */
 #define OMAP3630_SR_MPU_DEFAULT_MARGIN		37500
 #define OMAP3630_SR_MPU_DEFAULT_MARGIN_1G	62500
@@ -180,11 +181,10 @@ static struct omap_opp_def __initdata omap36xx_opp_def_list[] = {
 				200000000, OMAP3630_VDD_CORE_OPP50_UV),
 #else
 	OPP_INITIALIZER("l3_main", "dpll3_m2_ck", "core", true,
-				200000000, OMAP3630_VDD_CORE_OPP50_UV),
-#endif
+				100000000, OMAP3630_VDD_CORE_OPP50_UV),
 	/* L3 OPP2 - OPP100, OPP-Turbo, OPP-SB */
 	OPP_INITIALIZER("l3_main", "dpll3_m2_ck", "core", true,
-				400000000, OMAP3630_VDD_CORE_OPP100_UV),
+				200000000, OMAP3630_VDD_CORE_OPP100_UV),
 
 	/* DSP OPP1 - OPP50 */
 	OPP_INITIALIZER("iva", "dpll2_ck", "mpu_iva", true,  260000000, OMAP3630_VDD_MPU_OPP50_UV),
