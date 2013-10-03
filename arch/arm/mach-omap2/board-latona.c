@@ -62,8 +62,19 @@ extern struct omap_board_mux *latona_board_wk_mux_ptr;
 static void __init latona_init_early(void)
 {
 	omap2_init_common_infrastructure();
-	omap2_init_common_devices(hyb18m512160af6_sdrc_params,
-					  hyb18m512160af6_sdrc_params);
+	omap2_init_common_devices(hyb18m512160af6_sdrc_params, NULL);
+}
+
+/* Secure ram save size */
+static struct omap3_secure_copy_data secure_copy_data = {
+	.size = 0xF040,
+	/*60K + 64 Bytes header EMU/HS devices */
+};
+
+static void __init latona_init_irq(void)
+{
+	omap3_secure_copy_data_set(&secure_copy_data);
+	omap_init_irq();
 }
 
 static const struct usbhs_omap_board_data usbhs_bdata __initconst = {
@@ -296,7 +307,7 @@ MACHINE_START(LATONA, "SAMSUNG LATONA BOARD")
 	.reserve	= latona_reserve,
 	.map_io		= omap3_map_io,
 	.init_early	= latona_init_early,
-	.init_irq	= omap_init_irq,
+	.init_irq	= latona_init_irq,
 	.init_machine	= latona_init,
 	.timer		= &omap_timer,
 MACHINE_END
