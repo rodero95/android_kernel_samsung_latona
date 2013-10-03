@@ -75,6 +75,11 @@ static inline bool is_suspending(void)
 /* pm34xx errata defined in pm.h */
 u16 pm34xx_errata;
 
+/* Secure ram save size - store the defaults */
+static struct omap3_secure_copy_data secure_copy_data = {
+	.size = 0x803F,
+};
+
 struct power_state {
 	struct powerdomain *pwrdm;
 	u32 next_state;
@@ -173,6 +178,26 @@ static void omap3_core_restore_context(void)
 	/* Restore the interrupt controller context */
 	omap_intc_restore_context();
 	omap_dma_global_context_restore();
+}
+
+/**
+ * omap3_secure_copy_data_set() - set up the secure ram copy size
+ * @data - platform specific customization
+ *
+ * This function should be invoked by the board's init_irq function to update
+ * data prior to pm_init call is invoked. This call be done to update based on
+ * ppa used on that platform.
+ *
+ * Returns -EINVAL for bad values, and 0 if all good.
+ */
+int __init omap3_secure_copy_data_set(struct omap3_secure_copy_data *data)
+{
+	if (!data || !data->size)
+		return -EINVAL;
+
+	memcpy(&secure_copy_data, data, sizeof(secure_copy_data));
+
+	return 0;
 }
 
 /*
@@ -471,6 +496,7 @@ void omap_sram_idle(bool suspend)
 	if (core_next_state <= PWRDM_POWER_RET) {
 		omap3_save_scratchpad_contents();
 	}
+	omap3_intc_prepare_idle();
 #endif
 
 	/* CORE */
@@ -496,7 +522,9 @@ void omap_sram_idle(bool suspend)
 		}
 	}
 
+#ifndef CONFIG_MACH_OMAP_LATONA
 	omap3_intc_prepare_idle();
+#endif
 
 	/*
 	* On EMU/HS devices ROM code restores a SRDC value
@@ -558,6 +586,16 @@ void omap_sram_idle(bool suspend)
 	if (per_next_state < PWRDM_POWER_ON && core_next_state < PWRDM_POWER_ON) {
 		per_prev_state = pwrdm_read_prev_pwrst(per_pwrdm);
 		omap2_gpio_resume_after_idle(per_going_off);
+
+#ifdef CONFIG_MACH_OMAP_LATONA
+		// modified for mp3 playback current
+		if (per_prev_state == PWRDM_POWER_OFF) {
+			/* Don't attach mcbsp interrupt */
+			omap2_prm_clear_mod_reg_bits(OMAP3430_EN_MCBSP2_MASK,
+				  OMAP3430_PER_MOD, OMAP3430_PM_MPUGRPSEL);
+		}
+#endif
+
 	}
 
 	/* Disable IO-PAD and IO-CHAIN wakeup */
@@ -1040,7 +1078,7 @@ static int __init omap3_pm_init(void)
 	}
 	if (omap_type() != OMAP2_DEVICE_TYPE_GP) {
 		omap3_secure_ram_storage =
-			kmalloc(0x803F, GFP_KERNEL);
+			kmalloc(secure_copy_data.size, GFP_KERNEL);
 		if (!omap3_secure_ram_storage)
 			printk(KERN_ERR "Memory allocation failed when"
 					"allocating for secure sram context\n");
