@@ -210,6 +210,7 @@ static int transfer_thread_waiting = 0;
 static int cp_flow_control_stop_transfer = 0;
 static int cp_restart = 0;
 static int loop_back_test = 0;
+static int boot_done;
 
 volatile static void __iomem *p_virtual_buff = 0;
 
@@ -313,7 +314,7 @@ static inline int _send_cmd( struct ipc_spi *od, u32 cmd )
 					od->reg->mailbox_BA = cmd;
 
 					if( transfer_thread_waiting ) {
-						//transfer_thread_waiting = 0;
+						transfer_thread_waiting = 0;
 
 						dev_dbg( od->dev, "(%d) signal transfer event.\n", __LINE__ );
 						
@@ -334,7 +335,7 @@ static inline int _send_cmd( struct ipc_spi *od, u32 cmd )
 			dev_dbg( od->dev, "(%d) =>send data ( 0x%x )\n", __LINE__, cmd );
 			
 			if( transfer_thread_waiting ) {
-				//transfer_thread_waiting = 0;
+				transfer_thread_waiting = 0;
 				
 				dev_dbg( od->dev, "(%d) signal transfer event.\n", __LINE__ );
 				
@@ -543,6 +544,9 @@ static irqreturn_t ipc_spi_irq_handler( int irq, void *data ) // SRDY Rising EDG
 
 	srdy_pin = gpio_get_value( gpio_srdy );
 
+	if (!boot_done)
+		return IRQ_HANDLED;
+
 	if( !srdy_pin ) {
 		pr_info("SRDY LOW.\n");
 		return IRQ_HANDLED;
@@ -554,7 +558,7 @@ static irqreturn_t ipc_spi_irq_handler( int irq, void *data ) // SRDY Rising EDG
 	up( &srdy_sem ); // signal srdy event
 
 	if( transfer_thread_waiting ) {
-		//transfer_thread_waiting = 0;
+		transfer_thread_waiting = 0;
 
 		if( ipc_spi_irq_log_flag )
 			dev_dbg( od->dev, "(%d) signal transfer event.\n", __LINE__ );
@@ -2778,6 +2782,8 @@ static int ipc_spi_thread( void *data )
 
 	printk( "[%s] ipc_spi_thread start.\n", __func__ );
 
+	boot_done = 1;
+
 	if( !p_ipc_spi ) {
 		printk( "[%s] p_ipc_spi is NULL.\n", __func__ );
 
@@ -2861,7 +2867,6 @@ SILENT_RESET :
 				skip_SRDY_chk = 0;
 
 				down( &transfer_event_sem ); // wait event( tx or srdy )
-				transfer_thread_waiting = 0;
 				
 				dev_dbg( &p_ipc_spi->dev, "(%d) got tx-srdy event.\n", __LINE__ );
 			}
