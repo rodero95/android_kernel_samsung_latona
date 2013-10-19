@@ -1376,9 +1376,6 @@ static int mxt_resume(struct device *dev)
 	mutex_unlock(&input_dev->mutex);
 
 #ifdef CONFIG_LEDS_LATONA_BACKLIGHT_TIMEOUT
-	enable_irq(data->irq);
-	
-#ifdef CONFIG_LEDS_LATONA
 	latona_leds_report_event(KEY_POWER, 1);
 #endif
 
