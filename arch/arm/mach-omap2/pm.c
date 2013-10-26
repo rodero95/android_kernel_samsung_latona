@@ -117,74 +117,187 @@ struct device *omap4_get_fdif_device(void)
 }
 EXPORT_SYMBOL(omap4_get_fdif_device);
 
-#ifdef CONFIG_OMAP_PM
-static ssize_t vdd_opp_show(struct kobject *, struct kobj_attribute *, char *);
-static ssize_t vdd_opp_store(struct kobject *k, struct kobj_attribute *,
-			  const char *buf, size_t n);
+static ssize_t dsp_freq_show(struct kobject *, struct kobj_attribute *, char *);
+static ssize_t dsp_freq_store(struct kobject *, struct kobj_attribute *,
+			      const char *, size_t);
 
 static struct kobj_attribute dsp_freq_attr =
-	__ATTR(dsp_freq, 0644, vdd_opp_show, vdd_opp_store);
+	__ATTR(dsp_freq, 0644, dsp_freq_show, dsp_freq_store);
 
-static ssize_t vdd_opp_show(struct kobject *kobj, struct kobj_attribute *attr,
-			 char *buf)
+static ssize_t dsp_freq_show(struct kobject *kobj, struct kobj_attribute *attr,
+			     char *buf)
 {
+	static struct clk *clk_handle;
+	unsigned long freq;
 
-	if (attr == &dsp_freq_attr)
-	{
-		static struct clk *clk_handle;
-		unsigned long freq;
-		clk_handle = clk_get(NULL, "dpll2_ck");
-			if (!clk_handle)
-				pr_err("%s: clk_get failed to get dpll2_ck\n", __func__);
-
-			        freq = clk_get_rate(clk_handle);
-
-		return sprintf(buf, "%lu\n", freq/1000);
-	}
-	else
+	clk_handle = clk_get(NULL, "dpll2_ck");
+	if (!clk_handle) {
+		pr_err("%s: clk_get failed to get dpll2_ck\n", __func__);
 		return -EINVAL;
+	}
+
+	freq = clk_get_rate(clk_handle);
+
+	return sprintf(buf, "%lu\n", freq/1000);
 }
 
-static ssize_t vdd_opp_store(struct kobject *kobj, struct kobj_attribute *attr,
-			  const char *buf, size_t n)
+static ssize_t dsp_freq_store(struct kobject *kobj, struct kobj_attribute *attr,
+			      const char *buf, size_t n)
 {
 	unsigned long value;
+	u8 opp_id = 1;
+	u8 i, size;
+
 	if (sscanf(buf, "%lu", &value) != 1)
 		return -EINVAL;
 
-	if (attr == &dsp_freq_attr) {
-		u8 opp_id = 1;
-		u8 i, size;
-		size  =
-		    sizeof(omap36xx_opp_def_list_shared)/sizeof(struct omap_opp_def);
+	size = sizeof(omap36xx_opp_def_list_shared)/sizeof(struct omap_opp_def);
 
-		for (i = 0; i < size; i++) {
-			if (omap36xx_opp_def_list_shared[i].freq == 0)
-			       break;
-
-			if (!strcmp("iva", omap36xx_opp_def_list_shared[i].hwmod_name))
-			{
-				if ((omap36xx_opp_def_list_shared[i].freq/1000) == value)
-					break;
-				else
-					opp_id ++;
-			}
-		  }
-
-		if (opp_id == 0) {
-			printk(KERN_ERR "%s: Invalid value\n", __func__);
-			return -EINVAL;
+	for (i = 0; i < size; i++) {
+		if (omap36xx_opp_def_list_shared[i].freq == 0)
+			break;
+		if (!strcmp("iva", omap36xx_opp_def_list_shared[i].hwmod_name)) {
+			if ((omap36xx_opp_def_list_shared[i].freq/1000) == value)
+				break;
+			else
+				opp_id++;
 		}
+	}
 
-		omap_pm_dsp_set_min_opp(opp_id);
+	omap_pm_dsp_set_min_opp(opp_id);
 
-	} else {
+	return n;
+}
+
+
+static ssize_t vdd_opp_show(struct kobject *kobj, struct kobj_attribute *attr, char *);
+static ssize_t vdd_opp_store(struct kobject *kobj, struct kobj_attribute *attr,
+			     const char *, size_t);
+
+static struct kobj_attribute vdd_opp1_attr =
+	__ATTR(vdd_opp1, S_IRUGO | S_IWUSR, vdd_opp_show, vdd_opp_store);
+static struct kobj_attribute vdd_opp2_attr =
+	__ATTR(vdd_opp2, S_IRUGO | S_IWUSR, vdd_opp_show, vdd_opp_store);
+static struct kobj_attribute vdd_opp3_attr =
+	__ATTR(vdd_opp3, S_IRUGO | S_IWUSR, vdd_opp_show, vdd_opp_store);
+static struct kobj_attribute vdd_opp4_attr =
+	__ATTR(vdd_opp4, S_IRUGO | S_IWUSR, vdd_opp_show, vdd_opp_store);
+#ifdef CONFIG_LATONA_OPP5_ENABLED
+static struct kobj_attribute vdd_opp5_attr =
+	__ATTR(vdd_opp5, S_IRUGO | S_IWUSR, vdd_opp_show, vdd_opp_store);
+#endif
+
+static struct attribute *vdd_opp_attrs[] = {
+	&vdd_opp1_attr.attr,
+	&vdd_opp2_attr.attr,
+	&vdd_opp3_attr.attr,
+	&vdd_opp4_attr.attr,
+#ifdef CONFIG_LATONA_OPP5_ENABLED
+	&vdd_opp5_attr.attr,
+#endif
+	NULL,
+};
+
+static struct attribute_group vdd_opp_attr_group = {
+	.attrs = vdd_opp_attrs,
+};
+
+static ssize_t vdd_opp_show(struct kobject *kobj, struct kobj_attribute *attr,
+			    char *buf)
+{
+	int opp = 0;
+	struct voltagedomain *voltdm;
+	struct omap_volt_data *volt_data;
+
+	voltdm = voltdm_lookup("mpu_iva");
+	if (!voltdm) {
+		pr_err("%s: Unable to get vdd pointer for vdd_mpu\n", __func__);
+		return -EINVAL;
+	}
+
+	omap_voltage_get_volttable(voltdm, &volt_data);
+	if (!volt_data) {
+		pr_err("%s: Unable to get volt_data\n", __func__);
+		return -EINVAL;
+	}
+
+	if (attr == &vdd_opp1_attr)
+		opp = 0;
+	else if (attr == &vdd_opp2_attr)
+		opp = 1;
+	else if (attr == &vdd_opp3_attr)
+		opp = 2;
+	else if (attr == &vdd_opp4_attr)
+		opp = 3;
+#ifdef CONFIG_LATONA_OPP5_ENABLED
+	else if (attr == &vdd_opp5_attr)
+		opp = 4;
+#endif
+
+	return sprintf(buf, "%lu\n", volt_data[opp].volt_calibrated);
+}
+
+static ssize_t vdd_opp_store(struct kobject *kobj, struct kobj_attribute *attr,
+			     const char *buf, size_t n)
+{
+	int ret;
+	int opp = 0;
+	unsigned long value;
+	struct voltagedomain *voltdm;
+	struct omap_volt_data *volt_data;
+
+	if (sscanf(buf, "%lu", &value) != 1)
+		return -EINVAL;
+
+	if (attr == &vdd_opp1_attr)
+		opp = 0;
+	else if (attr == &vdd_opp2_attr)
+		opp = 1;
+	else if (attr == &vdd_opp3_attr)
+		opp = 2;
+	else if (attr == &vdd_opp4_attr)
+		opp = 3;
+#ifdef CONFIG_LATONA_OPP5_ENABLED
+	else if (attr == &vdd_opp5_attr)
+		opp = 4;
+#endif
+
+	voltdm = voltdm_lookup("mpu_iva");
+	if (!voltdm) {
+		pr_err("%s: Unable to get vdd pointer for vdd_mpu\n", __func__);
+		return -EINVAL;
+	}
+
+	omap_voltage_get_volttable(voltdm, &volt_data);
+	if (!volt_data) {
+		pr_err("%s: Unable to get volt_data\n", __func__);
+		return -EINVAL;
+	}
+
+	/* Don't try to change voltage if SmartReflex is enabled */
+	if (volt_data[opp].volt_margin != SR1P5_MARGIN_DISABLE_SR) {
+		pr_err("%s: SmartReflex is enabled, skipping...\n", __func__);
+		return -EINVAL;
+	}
+
+	/* Stay close to the nominal voltage */
+	if ((value < volt_data[opp].volt_nominal - 3 * 12500) ||
+	    (value > volt_data[opp].volt_nominal + 3 * 12500)) {
+		pr_err("%s: Out of range voltage\n", __func__);
+		return -EINVAL;
+	}
+
+	volt_data[opp].volt_calibrated = value;
+
+	ret = voltdm_scale(voltdm, &volt_data[opp]);
+	if (ret) {
+		pr_err("%s: Fail set voltage(v=%ld)on vdd%s\n",
+			__func__, volt_data[opp].volt_calibrated, voltdm->name);
 		return -EINVAL;
 	}
 
 	return n;
 }
-#endif
 
 /**
  * omap_pm_get_pmic_lp_time() - retrieve the oscillator time
@@ -559,20 +672,24 @@ static void __init omap4_init_voltages(void)
 
 static int __init omap2_common_pm_init(void)
 {
+	int error;
+
 	omap2_init_processor_devices();
 	omap_pm_if_init();
 
-#ifdef CONFIG_OMAP_PM
-	{
-		int error = -EINVAL;
-
-		error = sysfs_create_file(power_kobj, &dsp_freq_attr.attr);
-		if (error) {
-			printk(KERN_ERR "%s: sysfs_create_file(dsp_freq) failed %d\n", __func__, error);
-			return error;
-		}
+	error = sysfs_create_file(power_kobj, &dsp_freq_attr.attr);
+	if (error) {
+		pr_err("%s: sysfs_create_file(%s) failed %d\n",
+			__func__, dsp_freq_attr.attr.name, error);
+		return error;
 	}
-#endif
+
+	error = sysfs_create_group(power_kobj, &vdd_opp_attr_group);
+	if (error) {
+		pr_err("%s: failed to create sysfs group\n", __func__);
+		return error;
+	}
+
 	return 0;
 }
 postcore_initcall(omap2_common_pm_init);
