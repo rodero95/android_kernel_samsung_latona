@@ -175,6 +175,11 @@ static struct omap_opp_def __initdata omap36xx_opp_def_list[] = {
 				1100000000, OMAP3630_VDD_MPU_OPP2G_UV),
 #endif
 
+#ifdef CONFIG_MACH_OMAP_LATONA
+	/* L3 OPP1 - OPP50 */
+	OPP_INITIALIZER("l3_main", "l3_ick", "core", false,
+				100000000, OMAP3630_VDD_CORE_OPP50_UV),
+#else
 	/* L3 OPP1 - OPP50 */
 #ifdef CONFIG_MACH_OMAP_LATONA
 	OPP_INITIALIZER("l3_main", "dpll3_m2_ck", "core", false,
@@ -182,6 +187,7 @@ static struct omap_opp_def __initdata omap36xx_opp_def_list[] = {
 #else
 	OPP_INITIALIZER("l3_main", "dpll3_m2_ck", "core", true,
 				100000000, OMAP3630_VDD_CORE_OPP50_UV),
+#endif
 	/* L3 OPP2 - OPP100, OPP-Turbo, OPP-SB */
 	OPP_INITIALIZER("l3_main", "dpll3_m2_ck", "core", true,
 				200000000, OMAP3630_VDD_CORE_OPP100_UV),
