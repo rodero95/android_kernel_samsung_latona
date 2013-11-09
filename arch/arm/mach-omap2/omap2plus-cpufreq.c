@@ -454,11 +454,7 @@ static int __cpuinit omap_cpu_init(struct cpufreq_policy *policy)
 	cpufreq_frequency_table_get_attr(freq_table, policy->cpu);
 
 	policy->min = policy->cpuinfo.min_freq;
-#ifdef CONFIG_LATONA_OPP5_ENABLED
-	policy->max = freq_table[3].frequency;
-#else
 	policy->max = policy->cpuinfo.max_freq;
-#endif
 	policy->cur = omap_getspeed(policy->cpu);
 
 	/* Clamp clock to the maximum nominal frequency provided by board */
