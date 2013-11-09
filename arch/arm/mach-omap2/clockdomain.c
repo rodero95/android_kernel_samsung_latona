@@ -875,9 +875,6 @@ int clkdm_clk_enable(struct clockdomain *clkdm, struct clk *clk)
 	if ((atomic_inc_return(&clkdm->usecount) > 1) && autodeps)
 		return 0;
 
-	if (clkdm->flags & CLKDM_NO_MANUAL_TRANS)
-		return 0;
-
 	/* Clockdomain now has one enabled downstream clock */
 
 	pr_debug("clockdomain: clkdm %s: clk %s now enabled\n", clkdm->name,
@@ -925,9 +922,6 @@ int clkdm_clk_disable(struct clockdomain *clkdm, struct clk *clk)
 #endif
 
 	if (atomic_dec_return(&clkdm->usecount) > 0)
-		return 0;
-
-	if (clkdm->flags & CLKDM_NO_MANUAL_TRANS)
 		return 0;
 
 	/* All downstream clocks of this clockdomain are now disabled */
