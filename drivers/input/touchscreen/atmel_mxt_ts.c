@@ -1367,6 +1367,8 @@ static int mxt_resume(struct device *dev)
 		if (ret)
 			dev_err(dev, "Resume recalibration failed %d\n", ret);
 		msleep(MXT_CAL_TIME);
+		
+	enable_irq(data->irq);
 
 	mutex_lock(&input_dev->mutex);
 
