@@ -32,7 +32,7 @@ bool off_mode_enabled;
 #ifdef CONFIG_TIDSPBRIDGE_DVFS
 #include <plat/common.h>
 #include <../mach-omap2/omap_opp_data.h>
-static struct clk *clk_handle;
+static struct clk *clk_handle = NULL;
 #endif
 
 /*
@@ -127,6 +127,7 @@ void omap_pm_dsp_set_min_opp(u8 opp_id)
 	int i, cnt = 1;
 	int size;
 	unsigned long dsp_rate[5] = {0};
+	unsigned long cur_rate = clk_get_rate(clk_handle);
 
 	size  =
 	sizeof(omap36xx_opp_def_list_shared)/sizeof(struct omap_opp_def);
@@ -136,6 +137,10 @@ void omap_pm_dsp_set_min_opp(u8 opp_id)
 		if (!strcmp("iva", omap36xx_opp_def_list_shared[i].hwmod_name))
 			dsp_rate[cnt++] = omap36xx_opp_def_list_shared[i].freq;
 	}
+
+	/* Change rate only when required */
+	if (cur_rate == dsp_rate[opp_id])
+		return;
 
 	iva_dev = omap2_get_iva_device();
 
@@ -170,10 +175,6 @@ u8 omap_pm_dsp_get_opp(void)
 		if (!strcmp("iva", omap36xx_opp_def_list_shared[i].hwmod_name))
 			dsp_rate[cnt++] = omap36xx_opp_def_list_shared[i].freq;
 	}
-
-	clk_handle = clk_get(NULL, "dpll2_ck");
-	if (!clk_handle)
-		pr_err("%s: clk_get failed to get dpll2_ck\n", __func__);
 
 	freq = clk_get_rate(clk_handle);
 
@@ -287,6 +288,11 @@ int __init omap_pm_if_early_init(void)
 /* Must be called after clock framework is initialized */
 int __init omap_pm_if_init(void)
 {
+#ifdef CONFIG_TIDSPBRIDGE_DVFS
+	clk_handle = clk_get(NULL, "dpll2_ck");
+	if (IS_ERR(clk_handle))
+		return PTR_ERR(clk_handle);
+#endif
 	return omap_pm_if_init_helper();
 }
 
