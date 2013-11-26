@@ -31,7 +31,6 @@
 #include <asm/sizes.h>
 #include <plat/common.h>
 #include <plat/board.h>
-#include <plat/omap-serial.h>
 #include <plat/usb.h>
 
 #include <mach/board-latona.h>
@@ -98,36 +97,17 @@ static int plat_kim_resume(struct platform_device *pdev)
 	return 0;
 }
 
-static bool uart_req;
 static struct wake_lock st_wk_lock;
-/* Call the uart disable of serial driver */
-static int plat_uart_disable(void)
+static int plat_kim_chip_asleep(void)
 {
-	int port_id = 0;
-	int err = 0;
-	if (uart_req) {
-		sscanf(WILINK_UART_DEV_NAME, "/dev/ttyS%d", &port_id);
-		err = omap_serial_ext_uart_disable(port_id);
-		if (!err)
-			uart_req = false;
-	}
 	wake_unlock(&st_wk_lock);
-	return err;
+	return 0;
 }
 
-/* Call the uart enable of serial driver */
-static int plat_uart_enable(void)
+static int plat_kim_chip_awake(void)
 {
-	int port_id = 0;
-	int err = 0;
-	if (!uart_req) {
-		sscanf(WILINK_UART_DEV_NAME, "/dev/ttyS%d", &port_id);
-		err = omap_serial_ext_uart_enable(port_id);
-		if (!err)
-			uart_req = true;
-	}
-	wake_lock(&st_wk_lock);
-	return err;
+	wake_lock_timeout(&st_wk_lock, 5*HZ);
+	return 0;
 }
 
 /* wl127x BT, FM, GPS connectivity chip */
@@ -138,10 +118,8 @@ struct ti_st_plat_data wilink_pdata = {
 	.baud_rate = 3000000,
 	.suspend = plat_kim_suspend,
 	.resume = plat_kim_resume,
-	.chip_asleep = plat_uart_disable,
-	.chip_awake = plat_uart_enable,
-	.chip_enable = plat_uart_enable,
-	.chip_disable = plat_uart_disable,
+	.chip_asleep = plat_kim_chip_asleep,
+	.chip_awake = plat_kim_chip_awake,
 };
 static struct platform_device wl127x_device = {
 	.name           = "kim",
