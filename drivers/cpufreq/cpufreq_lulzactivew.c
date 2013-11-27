@@ -1211,4 +1211,3 @@ module_exit(cpufreq_lulzactivew_exit);
 MODULE_AUTHOR("Tegrak <luciferanna@gmail.com>; Erik Birgiser <ariesrik96@gmail.com>");
 MODULE_DESCRIPTION("'lulzactiveW' - a conbination of Lulzactive and Performance");
 MODULE_LICENSE("GPL");
-
