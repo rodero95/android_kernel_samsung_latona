@@ -53,6 +53,10 @@
 #else
 #define SGX_PARENT_CLOCK "core_ck"
 #endif
+char sgx_parent_clock[SYS_SGX_CLOCK_NAME_LEN] = SGX_PARENT_CLOCK;
+unsigned long sgx_clock_speed = SYS_SGX_CLOCK_SPEED;
+
+extern uint sgx_apm_latency;
 
 extern struct platform_device *gpsPVRLDMDev;
 #if defined(SGX530) && (SGX_CORE_REV == 125)
@@ -119,12 +123,12 @@ static inline IMG_UINT32 scale_by_rate(IMG_UINT32 val, IMG_UINT32 rate1, IMG_UIN
 
 static inline IMG_UINT32 scale_prop_to_SGX_clock(IMG_UINT32 val, IMG_UINT32 rate)
 {
-	return scale_by_rate(val, rate, SYS_SGX_CLOCK_SPEED);
+	return scale_by_rate(val, rate, sgx_clock_speed);
 }
 
 static inline IMG_UINT32 scale_inv_prop_to_SGX_clock(IMG_UINT32 val, IMG_UINT32 rate)
 {
-	return scale_by_rate(val, SYS_SGX_CLOCK_SPEED, rate);
+	return scale_by_rate(val, sgx_clock_speed, rate);
 }
 
 IMG_VOID SysGetSGXTimingInformation(SGX_TIMING_INFORMATION *psTimingInfo)
@@ -147,7 +151,7 @@ IMG_VOID SysGetSGXTimingInformation(SGX_TIMING_INFORMATION *psTimingInfo)
 #else
 	psTimingInfo->bEnableActivePM = IMG_FALSE;
 #endif
-	psTimingInfo->ui32ActivePowManLatencyms = SYS_SGX_ACTIVE_POWER_LATENCY_MS;
+	psTimingInfo->ui32ActivePowManLatencyms = sgx_apm_latency;
 }
 
 PVRSRV_ERROR EnableSGXClocks(SYS_DATA *psSysData)
@@ -188,7 +192,7 @@ PVRSRV_ERROR EnableSGXClocks(SYS_DATA *psSysData)
 		return PVRSRV_ERROR_UNABLE_TO_ENABLE_CLOCK;
 	}
 
-	lNewRate = clk_round_rate(psSysSpecData->psSGX_FCK, SYS_SGX_CLOCK_SPEED + ONE_MHZ);
+	lNewRate = clk_round_rate(psSysSpecData->psSGX_FCK, sgx_clock_speed + ONE_MHZ);
 	if (lNewRate <= 0)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "EnableSGXClocks: Couldn't round SGX functional clock rate"));
@@ -505,7 +509,7 @@ PVRSRV_ERROR EnableSystemClocks(SYS_DATA *psSysData)
 
 		atomic_set(&psSysSpecData->sSGXClocksEnabled, 0);
 
-		psCLK = clk_get(NULL, SGX_PARENT_CLOCK);
+		psCLK = clk_get(NULL, sgx_parent_clock);
 		if (IS_ERR(psCLK)) {
 			PVR_DPF((PVR_DBG_ERROR, "EnableSsystemClocks:"
 						"Couldn't get Core Clock"));
